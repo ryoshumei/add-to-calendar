@@ -54,3 +54,4 @@ Thumbs.db
 .npm
 .yarn-integrity
 .eslintcache
+.svg
