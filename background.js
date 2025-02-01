@@ -28,7 +28,7 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
             activeRequests.add(tab.id);
 
             // Get API key
-            const { apiKey } = await chrome.storage.sync.get("apiKey");
+            const {apiKey} = await chrome.storage.sync.get("apiKey");
 
             if (!apiKey) {
                 chrome.notifications.create({
@@ -60,7 +60,7 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
                 // If content script isn't ready, inject it
                 console.log('Injecting content script...');
                 await chrome.scripting.executeScript({
-                    target: { tabId: tab.id },
+                    target: {tabId: tab.id},
                     files: ['content.js']
                 });
 
@@ -76,7 +76,7 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
                     });
                 } catch (retryError) {
                     // If it still fails, open calendar directly
-                    chrome.tabs.create({ url: calendarUrl });
+                    chrome.tabs.create({url: calendarUrl});
                 }
             }
         } catch (error) {
@@ -96,17 +96,22 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
 
 // Process text with OpenAI API
 async function processWithOpenAI(text, apiKey) {
-    const systemPrompt = `Extract event details from the given text and return a JSON object with the following properties:
-    - title: The event title/name
-    - description: A brief description of the event
-    - startTime: Start time in ISO 8601 format (YYYY-MM-DDTHH:mm:ss)
-    - endTime: End time in ISO 8601 format (YYYY-MM-DDTHH:mm:ss)
-    - location: Location of the event (if mentioned)
+    const now = new Date();
+    const currentDateTime = now.toLocaleString();
 
-    For relative dates like "tomorrow", "next Monday", etc., use the current date as reference.
-    If no specific time is mentioned, assume it starts at 10:00 AM and lasts for 1 hour.
-    
-    Only return the JSON object, no additional text.`;
+    const systemPrompt = `You are a JSON API that extracts event details from text. Return ONLY a raw JSON object with these properties:
+    {
+        "title": "event title",
+        "description": "brief description",
+        "startTime": "YYYY-MM-DDTHH:mm:ss",
+        "endTime": "YYYY-MM-DDTHH:mm:ss",
+        "location": "location if mentioned"
+    }
+    Current time is: ${currentDateTime}
+    For relative dates, use the current time as reference.
+    If no specific time mentioned, assume 10:00 AM for 1 hour.
+    DO NOT include any markdown formatting, code blocks, or extra text.
+    ONLY return the JSON object itself.`;
 
     try {
         const response = await fetch('https://api.openai.com/v1/chat/completions', {
@@ -124,10 +129,10 @@ async function processWithOpenAI(text, apiKey) {
                     },
                     {
                         role: 'user',
-                        content: text
+                        content: `Time: ${currentDateTime}\nText: ${text}`
                     }
                 ],
-                temperature: 0.3
+                temperature: 0.3 // Lower temperature for more consistent JSON output
             })
         });
 
@@ -137,16 +142,23 @@ async function processWithOpenAI(text, apiKey) {
         }
 
         const data = await response.json();
-        const eventDetails = JSON.parse(data.choices[0].message.content);
-        validateEventDetails(eventDetails);
+        // Log the raw response for debugging
+        console.log('Raw GPT response:', data.choices[0].message.content);
 
-        return eventDetails;
+        try {
+            const eventDetails = JSON.parse(data.choices[0].message.content.trim());
+            validateEventDetails(eventDetails);
+            return eventDetails;
+        } catch (parseError) {
+            console.error('JSON Parse Error:', parseError);
+            console.error('Raw content:', data.choices[0].message.content);
+            throw new Error('Failed to parse GPT response as JSON');
+        }
     } catch (error) {
         console.error('Error calling OpenAI API:', error);
         throw new Error('Failed to process text: ' + error.message);
     }
 }
-
 // Create Google Calendar URL
 function createGoogleCalendarUrl(eventDetails) {
     const baseUrl = 'https://calendar.google.com/calendar/render';
@@ -210,16 +222,16 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         processWithOpenAI(request.text, request.apiKey)
             .then(result => {
                 console.log('Test result:', result);
-                sendResponse({ success: true, result });
+                sendResponse({success: true, result});
             })
             .catch(error => {
                 console.error('Test error:', error);
-                sendResponse({ success: false, error: error.message });
+                sendResponse({success: false, error: error.message});
             });
         return true;
     } else if (request.action === 'testCalendarUrl') {
         testCalendarUrl();
-        sendResponse({ success: true });
+        sendResponse({success: true});
         return true;
     }
 });
