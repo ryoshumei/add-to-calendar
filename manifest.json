@@ -15,7 +15,7 @@
   "content_scripts": [
     {
       "matches": ["<all_urls>"],
-      "js": ["content.js", "scripts/api.js", "scripts/calendar.js"],
+      "js": ["content.js"],
       "run_at": "document_end"
     }
   ],
