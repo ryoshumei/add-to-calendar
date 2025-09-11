@@ -105,7 +105,7 @@ async function processWithOpenAI(text, apiKey) {
         "description": "brief description",
         "startTime": "YYYY-MM-DDTHH:mm:ss",
         "endTime": "YYYY-MM-DDTHH:mm:ss",
-        "location": "location if mentioned"
+        "location": "location if mentioned, include online link if available"
     }
     Current time is: ${currentDateTime}
     For relative dates, use the current time as reference.
@@ -121,7 +121,7 @@ async function processWithOpenAI(text, apiKey) {
                 'Authorization': `Bearer ${apiKey}`
             },
             body: JSON.stringify({
-                model: 'gpt-4o',
+                model: 'gpt-4.1-mini',
                 messages: [
                     {
                         role: 'system',

@@ -37,7 +37,7 @@ Calendar Event Creator is a Chrome extension that helps you quickly create Googl
 - Active internet connection
 
 ### Notes
-- The extension processes text using OpenAI's GPT-3.5 model
+- The extension processes text using OpenAI's GPT-4.1-mini model
 - Your API key is stored securely in Chrome's local storage
 - All data processing occurs client-side for privacy
 
@@ -78,7 +78,7 @@ Calendar Event Creatorは、OpenAIの自然言語処理機能を使用して、�
 - インターネット接続
 
 ### 注意事項
-- OpenAIのGPT-3.5モデルを使用してテキストを処理
+- OpenAIのGPT-4.1-miniモデルを使用してテキストを処理
 - APIキーはChromeのローカルストレージに安全に保存
 - プライバシーのため、すべてのデータ処理はクライアントサイドで実行
 
@@ -119,6 +119,6 @@ Calendar Event Creator 是一个 Chrome 扩展程序，它使用 OpenAI 的自�
 - 活跃的互联网连接
 
 ### 注意事项
-- 扩展程序使用 OpenAI 的 GPT-3.5 模型处理文本
+- 扩展程序使用 OpenAI 的 GPT-4.1-mini 模型处理文本
 - API 密钥安全存储在 Chrome 的本地存储中
 - 所有数据处理都在客户端进行，保护隐私
