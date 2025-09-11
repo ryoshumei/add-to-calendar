@@ -56,5 +56,5 @@ Thumbs.db
 .eslintcache
 .svg
 
-.zip
+*.zip
 CLAUDE.md
