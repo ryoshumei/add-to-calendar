@@ -7,7 +7,19 @@
     "contextMenus",
     "storage",
     "activeTab",
-    "scripting"
+    "scripting",
+    "identity"
+  ],
+  "oauth2": {
+    "client_id": "585728787132-5lr12sgh84a5lrl9b7p2kkoj4iqnc2dq.apps.googleusercontent.com",
+    "scopes": [
+      "openid",
+      "email",
+      "profile"
+    ]
+  },
+  "host_permissions": [
+    "https://*.supabase.co/*"
   ],
   "background": {
     "service_worker": "background.js"

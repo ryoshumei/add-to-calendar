@@ -1,4 +1,34 @@
 // background.js
+
+// Import configuration and services
+importScripts('config.js');
+importScripts('scripts/supabase-js.min.js'); // Supabase JavaScript client library
+importScripts('scripts/supabase-client.js');
+importScripts('scripts/calendar-service.js');
+
+// Global authentication state
+let supabaseAuth = null;
+let calendarService = null;
+let currentUser = null;
+
+// Initialize authentication on startup
+async function initializeAuth() {
+    try {
+        supabaseAuth = new SupabaseAuth();
+        await supabaseAuth.initialize();
+        await supabaseAuth.restoreSession();
+
+        calendarService = new CalendarService(supabaseAuth);
+
+        if (supabaseAuth.isAuthenticated()) {
+            currentUser = supabaseAuth.currentUser;
+            console.log('User authenticated:', currentUser?.email);
+        }
+    } catch (error) {
+        console.error('Failed to initialize authentication:', error);
+    }
+}
+
 // Create context menu when extension is installed
 chrome.runtime.onInstalled.addListener(() => {
     chrome.contextMenus.create({
@@ -6,6 +36,34 @@ chrome.runtime.onInstalled.addListener(() => {
         title: "Add to Google Calendar",
         contexts: ["selection"]
     });
+
+    // Initialize authentication
+    initializeAuth();
+});
+
+// Handle startup
+chrome.runtime.onStartup.addListener(() => {
+    initializeAuth();
+});
+
+// Handle messages from popup
+chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+    if (request.action === 'userAuthenticated') {
+        currentUser = request.user;
+        console.log('User authenticated via popup:', currentUser?.email);
+
+        // Reinitialize calendar service with authenticated user
+        if (supabaseAuth) {
+            calendarService = new CalendarService(supabaseAuth);
+        }
+
+        sendResponse({ success: true });
+    } else if (request.action === 'userSignedOut') {
+        currentUser = null;
+        console.log('User signed out');
+        sendResponse({ success: true });
+    }
+    return true; // Keep the message channel open for async response
 });
 
 // Store active requests to prevent duplicates
@@ -27,23 +85,56 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
             // Mark this tab as having an active request
             activeRequests.add(tab.id);
 
-            // Get API key
-            const {apiKey} = await chrome.storage.sync.get("apiKey");
-
-            if (!apiKey) {
-                chrome.notifications.create({
-                    type: 'basic',
-                    iconUrl: 'icons/icon128.png',
-                    title: 'Calendar Event Creator',
-                    message: 'Please set your OpenAI API key in the extension settings'
-                });
-                return;
-            }
-
-            // Process the selected text
             const selectedText = info.selectionText;
-            const eventDetails = await processWithOpenAI(selectedText, apiKey);
-            const calendarUrl = createGoogleCalendarUrl(eventDetails);
+            let eventDetails;
+            let result;
+
+            // Check if user is authenticated
+            if (currentUser && supabaseAuth?.isAuthenticated()) {
+                console.log('User authenticated, using backend service...');
+
+                // TODO: Implement backend text processing service
+                // For now, check if user has OpenAI API key as fallback
+                const {apiKey} = await chrome.storage.sync.get("apiKey");
+                if (apiKey) {
+                    // Use user's API key for processing
+                    eventDetails = await processWithOpenAI(selectedText, apiKey);
+                } else {
+                    // TODO: Replace with backend service call
+                    // Example: eventDetails = await processWithBackend(selectedText, supabaseAuth.getAccessToken());
+
+                    // For now, create a simple event from the selected text
+                    eventDetails = createBasicEventFromText(selectedText);
+                }
+
+                // Use calendar service for authenticated event creation
+                result = await calendarService.processEventCreation(eventDetails, selectedText);
+                console.log('Calendar service result:', result);
+
+            } else {
+                console.log('User not authenticated, using API key fallback...');
+
+                // Get API key for fallback processing
+                const {apiKey} = await chrome.storage.sync.get("apiKey");
+
+                if (!apiKey) {
+                    chrome.notifications.create({
+                        type: 'basic',
+                        iconUrl: 'icons/icon128.png',
+                        title: 'Calendar Event Creator',
+                        message: 'Please sign in with Google or set your OpenAI API key in extension settings'
+                    });
+                    return;
+                }
+
+                // Process with OpenAI and create calendar URL
+                eventDetails = await processWithOpenAI(selectedText, apiKey);
+                result = {
+                    method: 'url',
+                    calendarUrl: createGoogleCalendarUrl(eventDetails),
+                    message: 'Click to add event to your Google Calendar'
+                };
+            }
 
             // Try to send message to content script
             try {
@@ -51,7 +142,8 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
                     type: "SHOW_CONFIRMATION",
                     requestId,
                     eventDetails,
-                    calendarUrl
+                    calendarUrl: result.calendarUrl,
+                    result: result
                 });
 
                 // If we get here, the content script handled the message
@@ -72,11 +164,14 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
                         type: "SHOW_CONFIRMATION",
                         requestId,
                         eventDetails,
-                        calendarUrl
+                         calendarUrl: result.calendarUrl,
+                        result: result
                     });
                 } catch (retryError) {
                     // If it still fails, open calendar directly
-                    chrome.tabs.create({url: calendarUrl});
+                    if (result.calendarUrl) {
+                        chrome.tabs.create({url: result.calendarUrl});
+                    }
                 }
             }
         } catch (error) {
@@ -193,6 +288,28 @@ function createGoogleCalendarUrl(eventDetails) {
         console.error('Error creating calendar URL:', error);
         throw new Error('Failed to create calendar URL: ' + error.message);
     }
+}
+
+// Create basic event from text (fallback when no API key available)
+function createBasicEventFromText(text) {
+    const now = new Date();
+    const tomorrow = new Date(now);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+
+    // Set default time to 10:00 AM tomorrow for 1 hour
+    const startTime = new Date(tomorrow);
+    startTime.setHours(10, 0, 0, 0);
+
+    const endTime = new Date(startTime);
+    endTime.setHours(11, 0, 0, 0);
+
+    return {
+        title: text.substring(0, 100) + (text.length > 100 ? '...' : ''), // Truncate long text
+        description: `Event created from selected text: "${text}"`,
+        startTime: startTime.toISOString().slice(0, 19), // Format: YYYY-MM-DDTHH:mm:ss
+        endTime: endTime.toISOString().slice(0, 19),
+        location: ''
+    };
 }
 
 // Validate event details

@@ -17,10 +17,136 @@ h2 {
     font-size: 18px;
 }
 
+/* Authentication Section */
+.auth-section {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 16px;
+    border: 1px solid #e1e4e8;
+    border-radius: 8px;
+    background-color: #f9f9f9;
+}
+
+.auth-content h3 {
+    margin: 0 0 8px 0;
+    color: #1a1a1a;
+    font-size: 16px;
+}
+
+.auth-content p {
+    margin: 0 0 16px 0;
+    color: #6a737d;
+    font-size: 13px;
+    line-height: 1.4;
+}
+
+.google-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    width: 100%;
+    padding: 10px 16px;
+    background-color: white;
+    border: 1px solid #dadce0;
+    border-radius: 4px;
+    font-size: 14px;
+    font-weight: 500;
+    color: #3c4043;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.google-btn:hover {
+    background-color: #f8f9fa;
+    box-shadow: 0 1px 2px 0 rgba(60,64,67,.3);
+}
+
+.user-info {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 0;
+}
+
+.user-avatar {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    object-fit: cover;
+}
+
+.user-details {
+    flex: 1;
+}
+
+.user-name {
+    font-weight: 500;
+    color: #1a1a1a;
+    font-size: 14px;
+}
+
+.user-email {
+    color: #6a737d;
+    font-size: 13px;
+    margin-top: 2px;
+}
+
+.secondary-btn {
+    padding: 8px 16px;
+    background-color: #f6f8fa;
+    border: 1px solid #d1d9e0;
+    border-radius: 4px;
+    color: #24292e;
+    font-size: 14px;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.secondary-btn:hover {
+    background-color: #e1e4e8;
+}
+
 .api-key-section {
     display: flex;
     flex-direction: column;
     gap: 12px;
+}
+
+.api-key-section details {
+    border: 1px solid #e1e4e8;
+    border-radius: 6px;
+    padding: 16px;
+}
+
+.api-key-section summary {
+    cursor: pointer;
+    font-weight: 500;
+    color: #586069;
+    margin-bottom: 8px;
+    list-style: none;
+}
+
+.api-key-section summary::-webkit-details-marker {
+    display: none;
+}
+
+.api-key-section summary::before {
+    content: "▶";
+    margin-right: 8px;
+    transition: transform 0.2s;
+}
+
+.api-key-section details[open] summary::before {
+    transform: rotate(90deg);
+}
+
+.fallback-note {
+    color: #6a737d;
+    font-size: 12px;
+    margin: 8px 0 16px 0;
+    line-height: 1.4;
 }
 
 .input-group {
