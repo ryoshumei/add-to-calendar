@@ -61,3 +61,7 @@ CLAUDE.md
 
 private/
 /playwright-report/
+/tests/
+/playwright.config.js
+/calendar.svg
+/package.json
