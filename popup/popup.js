@@ -92,42 +92,64 @@ document.addEventListener('DOMContentLoaded', async () => {
             showMessage('Delete failed: ' + error.message, 'error');
         }
     });
+
+    // Listen for storage changes to update UI when session changes
+    // This handles the case where popup was closed during OAuth
+    chrome.storage.onChanged.addListener(async (changes, namespace) => {
+        if (namespace === 'local' && changes.supabase_session) {
+            console.log('🔄 Session changed in storage, updating UI');
+
+            if (changes.supabase_session.newValue) {
+                // Session was added/updated - restore it
+                if (supabaseAuth) {
+                    const restored = await supabaseAuth.restoreSession();
+                    if (restored) {
+                        console.log('✅ Session restored from storage change');
+                        updateAuthUI();
+                    }
+                }
+            } else {
+                // Session was removed - update UI to show logged out state
+                console.log('🔄 Session removed from storage');
+                if (supabaseAuth) {
+                    supabaseAuth.session = null;
+                    supabaseAuth.currentUser = null;
+                }
+                updateAuthUI();
+            }
+        }
+    });
 });
 
 // Handle Google Sign In
 async function handleGoogleSignIn() {
-    console.log('🔵 handleGoogleSignIn() called');
-
-    if (!supabaseAuth) {
-        console.error('❌ supabaseAuth is null');
-        showMessage('Authentication service not available', 'error');
-        return;
-    }
-
-    console.log('✅ supabaseAuth available, calling signInWithGoogle()');
+    console.log('🔵 handleGoogleSignIn() called in popup');
 
     try {
         showMessage('Signing in...', 'success');
-        const result = await supabaseAuth.signInWithGoogle();
 
-        console.log('✅ Sign in successful:', {
-            hasUser: !!result.user,
-            email: result.user?.email
+        // Send message to background script to handle OAuth
+        // This way OAuth continues even if popup closes
+        const response = await chrome.runtime.sendMessage({
+            action: 'signInWithGoogle'
         });
 
-        if (result.user) {
-            showMessage('Successfully signed in!', 'success');
-            
-            // Force update the auth UI
-            console.log('🔄 Updating UI after sign in...');
-            updateAuthUI();
+        console.log('✅ Background response:', response);
 
-            // Notify background script of successful authentication
-            chrome.runtime.sendMessage({
-                action: 'userAuthenticated',
-                user: result.user,
-                session: result.session
-            });
+        if (response.success) {
+            console.log('✅ Sign in successful:', response.user?.email);
+            showMessage('Successfully signed in!', 'success');
+
+            // Update local state
+            if (supabaseAuth && response.user && response.session) {
+                supabaseAuth.session = response.session;
+                supabaseAuth.currentUser = response.user;
+            }
+
+            // Update UI
+            updateAuthUI();
+        } else {
+            throw new Error(response.error || 'Sign in failed');
         }
     } catch (error) {
         console.error('Google sign in failed:', error);
@@ -137,28 +159,30 @@ async function handleGoogleSignIn() {
 
 // Handle Sign Out
 async function handleSignOut() {
-    console.log('🔵 handleSignOut() called');
-    
-    if (!supabaseAuth) {
-        showMessage('Authentication service not available', 'error');
-        return;
-    }
+    console.log('🔵 handleSignOut() called in popup');
 
     try {
-        const success = await supabaseAuth.signOut();
-        console.log('✅ Sign out result:', success);
-        
-        if (success) {
-            showMessage('Successfully signed out', 'success');
-            
-            // Force update the auth UI
-            console.log('🔄 Updating UI after sign out...');
-            updateAuthUI();
+        // Send message to background script to handle sign out
+        const response = await chrome.runtime.sendMessage({
+            action: 'signOut'
+        });
 
-            // Notify background script of sign out
-            chrome.runtime.sendMessage({
-                action: 'userSignedOut'
-            });
+        console.log('✅ Background sign out response:', response);
+
+        if (response.success) {
+            console.log('✅ Sign out successful');
+            showMessage('Successfully signed out', 'success');
+
+            // Update local state
+            if (supabaseAuth) {
+                supabaseAuth.session = null;
+                supabaseAuth.currentUser = null;
+            }
+
+            // Update UI
+            updateAuthUI();
+        } else {
+            throw new Error(response.error || 'Sign out failed');
         }
     } catch (error) {
         console.error('Sign out failed:', error);

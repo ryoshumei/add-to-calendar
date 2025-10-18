@@ -6,13 +6,18 @@
 ## English
 
 ### Overview
-Calendar Event Creator is a Chrome extension that helps you quickly create Google Calendar events from selected text using OpenAI's natural language processing capabilities.
+Calendar Event Creator is a Chrome extension that helps you quickly create Google Calendar events from selected text using OpenAI's natural language processing capabilities. The extension now features Google OAuth authentication and a backend service powered by Supabase Edge Functions.
 
 ### Features
-- Right-click on selected text to create calendar events
-- Automatic extraction of event details (title, time, location, etc.)
-- Quick preview and confirmation before adding to calendar
-- Seamless integration with Google Calendar
+- **Google Authentication**: Sign in with Google for seamless experience
+- **Smart Event Processing**: Three processing modes:
+  - Use your own OpenAI API key (if provided)
+  - Backend service processing (no API key needed when signed in)
+  - Basic fallback event creation
+- **Right-click Context Menu**: Create events from selected text
+- **Automatic Extraction**: Intelligently extracts event details (title, time, location, etc.)
+- **Quick Preview**: Review and confirm before adding to calendar
+- **Seamless Integration**: Direct integration with Google Calendar
 
 ### Installation
 1. Clone this repository or download the source code
@@ -21,25 +26,83 @@ Calendar Event Creator is a Chrome extension that helps you quickly create Googl
 4. Click "Load unpacked" and select the extension directory
 
 ### Setup
+
+**Option 1: Sign in with Google (Recommended)**
+1. Click the extension icon in Chrome
+2. Click "Sign in with Google"
+3. Authorize the extension
+4. Start creating events (no API key needed!)
+
+**Option 2: Use Your Own API Key**
 1. Click the extension icon in Chrome
 2. Enter your OpenAI API key in the settings
 3. Click "Save" to store your API key
+4. (Optional) Sign in with Google for additional features
 
 ### Usage
-1. Select text containing event information on any webpage
+1. Select text containing event information on any webpage (e.g., "Team meeting tomorrow at 2pm")
 2. Right-click and select "Add to Google Calendar"
 3. Review the extracted event details in the confirmation modal
 4. Click "Add to Calendar" to create the event
 
+The extension intelligently chooses the best processing method:
+- If you set an API key → Uses your key
+- If you're signed in → Uses our backend service
+- Otherwise → Creates a basic event
+
 ### Technical Requirements
 - Chrome Browser (Latest version recommended)
-- Valid OpenAI API key
+- Google Account (for authentication, optional)
+- OpenAI API key (optional, if not using backend service)
 - Active internet connection
+
+### Architecture
+
+This project follows a **monorepo structure**:
+
+```
+add-to-calendar/
+├── extension/          # Chrome extension code
+│   ├── background.js   # Service worker
+│   ├── content.js      # Content script
+│   ├── popup/          # Extension popup UI
+│   └── scripts/        # Authentication & calendar services
+├── supabase/           # Backend (Supabase Edge Functions)
+│   └── functions/
+│       └── process-text/  # Text processing Edge Function
+├── shared/             # Shared TypeScript types
+├── tests/              # Playwright E2E tests
+├── .github/workflows/  # CI/CD pipelines
+└── docs/               # Documentation
+```
+
+**Backend Service**: Powered by Supabase Edge Functions
+- Processes text using OpenAI API
+- No client-side API key needed
+- Serverless, auto-scaling architecture
+
+**Authentication**: Google OAuth via Supabase
+- Managed by Chrome Identity API
+- Session persistence across extension restarts
+- Secure token handling
+
+### Processing Priority
+
+1. **User's API Key** (if set): Uses client-side processing with your OpenAI key
+2. **Backend Service** (if authenticated): Uses our backend for processing
+3. **Basic Fallback**: Creates simple events without AI processing
 
 ### Notes
 - The extension processes text using OpenAI's GPT-4.1-mini model
-- Your API key is stored securely in Chrome's local storage
-- All data processing occurs client-side for privacy
+- API keys are stored securely in Chrome's sync storage (encrypted by Chrome)
+- Backend processing keeps your API usage private
+- Authentication sessions persist across browser restarts
+- All processing is done server-side or client-side (no data retention)
+
+### Developer Documentation
+- [Deployment Guide](docs/DEPLOYMENT.md) - Backend and extension deployment
+- [Backend Implementation](docs/BACKEND_IMPLEMENTATION.md) - Edge Function details
+- [CLAUDE.md](CLAUDE.md) - Project instructions for Claude Code
 
 ---
 

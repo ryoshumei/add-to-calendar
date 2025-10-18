@@ -11,9 +11,14 @@ let supabaseAuth = null;
 let calendarService = null;
 let currentUser = null;
 
+// Initialize immediately when service worker loads
+// This ensures auth is ready when messages arrive
+console.log('🚀 Service worker starting, initializing auth...');
+
 // Initialize authentication on startup
 async function initializeAuth() {
     try {
+        console.log('🔄 Initializing authentication...');
         supabaseAuth = new SupabaseAuth();
         await supabaseAuth.initialize();
         await supabaseAuth.restoreSession();
@@ -24,10 +29,23 @@ async function initializeAuth() {
             currentUser = supabaseAuth.currentUser;
             console.log('User authenticated:', currentUser?.email);
         }
+        console.log('✅ Authentication initialized successfully');
     } catch (error) {
-        console.error('Failed to initialize authentication:', error);
+        console.error('❌ Failed to initialize authentication:', error);
     }
 }
+
+// Ensure authentication is initialized (for service worker wake-ups)
+async function ensureAuthInitialized() {
+    if (!supabaseAuth) {
+        console.log('⚠️ Auth not initialized, initializing now...');
+        await initializeAuth();
+    }
+    return supabaseAuth !== null;
+}
+
+// Initialize authentication immediately when service worker loads
+initializeAuth();
 
 // Create context menu when extension is installed
 chrome.runtime.onInstalled.addListener(() => {
@@ -48,7 +66,98 @@ chrome.runtime.onStartup.addListener(() => {
 
 // Handle messages from popup
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-    if (request.action === 'userAuthenticated') {
+    if (request.action === 'signInWithGoogle') {
+        // Handle Google sign in from popup
+        console.log('🔵 Received signInWithGoogle request from popup');
+
+        // Ensure auth is initialized before processing
+        ensureAuthInitialized()
+            .then(initialized => {
+                if (!initialized || !supabaseAuth) {
+                    sendResponse({ success: false, error: 'Authentication service not available' });
+                    return;
+                }
+
+                // Perform OAuth in background (keeps running even if popup closes)
+                return supabaseAuth.signInWithGoogle();
+            })
+            .then(result => {
+                if (!result) return; // Error was already sent
+
+                console.log('✅ Background OAuth successful:', result.user?.email);
+                currentUser = result.user;
+
+                // Reinitialize calendar service with authenticated user
+                calendarService = new CalendarService(supabaseAuth);
+
+                sendResponse({
+                    success: true,
+                    user: result.user,
+                    session: result.session
+                });
+            })
+            .catch(error => {
+                console.error('❌ Background OAuth failed:', error);
+                sendResponse({
+                    success: false,
+                    error: error.message
+                });
+            });
+
+        return true; // Keep channel open for async response
+    } else if (request.action === 'signOut') {
+        // Handle sign out from popup
+        console.log('🔵 Received signOut request from popup');
+
+        // Ensure auth is initialized before processing
+        ensureAuthInitialized()
+            .then(initialized => {
+                if (!initialized || !supabaseAuth) {
+                    sendResponse({ success: false, error: 'Authentication service not available' });
+                    return Promise.resolve(false);
+                }
+
+                return supabaseAuth.signOut();
+            })
+            .then(success => {
+                if (success === false) return; // Error was already sent
+
+                if (success) {
+                    currentUser = null;
+                    console.log('✅ User signed out');
+                    sendResponse({ success: true });
+                } else {
+                    sendResponse({ success: false, error: 'Sign out failed' });
+                }
+            })
+            .catch(error => {
+                console.error('❌ Sign out error:', error);
+                sendResponse({ success: false, error: error.message });
+            });
+
+        return true; // Keep channel open for async response
+    } else if (request.action === 'getAuthState') {
+        // Return current authentication state
+        console.log('🔍 Popup requesting auth state');
+
+        // Ensure auth is initialized before checking state
+        ensureAuthInitialized()
+            .then(() => {
+                sendResponse({
+                    isAuthenticated: supabaseAuth?.isAuthenticated() || false,
+                    user: currentUser
+                });
+            })
+            .catch(error => {
+                console.error('❌ Error getting auth state:', error);
+                sendResponse({
+                    isAuthenticated: false,
+                    user: null
+                });
+            });
+
+        return true; // Keep channel open for async response
+    } else if (request.action === 'userAuthenticated') {
         currentUser = request.user;
         console.log('User authenticated via popup:', currentUser?.email);
 
@@ -91,20 +200,18 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
 
             // Check if user is authenticated
             if (currentUser && supabaseAuth?.isAuthenticated()) {
-                console.log('User authenticated, using backend service...');
+                console.log('User authenticated, checking processing method...');
 
-                // TODO: Implement backend text processing service
-                // For now, check if user has OpenAI API key as fallback
+                // Priority 1: Check if user has their own OpenAI API key
                 const {apiKey} = await chrome.storage.sync.get("apiKey");
                 if (apiKey) {
-                    // Use user's API key for processing
+                    // Use user's API key (they prefer their own key)
+                    console.log('Using user\'s OpenAI API key');
                     eventDetails = await processWithOpenAI(selectedText, apiKey);
                 } else {
-                    // TODO: Replace with backend service call
-                    // Example: eventDetails = await processWithBackend(selectedText, supabaseAuth.getAccessToken());
-
-                    // For now, create a simple event from the selected text
-                    eventDetails = createBasicEventFromText(selectedText);
+                    // Priority 2: Use backend service with our API key
+                    console.log('Using backend service');
+                    eventDetails = await processWithBackend(selectedText, supabaseAuth.getAccessToken());
                 }
 
                 // Use calendar service for authenticated event creation
@@ -188,6 +295,35 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
         }
     }
 });
+
+// Process text with backend service
+async function processWithBackend(text, accessToken) {
+    try {
+        console.log('Calling backend service...');
+        const response = await fetch(CONFIG.EDGE_FUNCTIONS.PROCESS_TEXT, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${accessToken}`,
+            },
+            body: JSON.stringify({ selectedText: text })
+        });
+
+        if (!response.ok) {
+            const errorData = await response.json();
+            throw new Error(errorData.error || `Backend processing failed: ${response.status}`);
+        }
+
+        const data = await response.json();
+        console.log('Backend processing successful:', data.eventDetails);
+        return data.eventDetails;
+    } catch (error) {
+        console.error('Backend processing error:', error);
+        // Fallback to basic event creation
+        console.log('Falling back to basic event creation...');
+        return createBasicEventFromText(text);
+    }
+}
 
 // Process text with OpenAI API
 async function processWithOpenAI(text, apiKey) {

@@ -1,0 +1,55 @@
+name: Deploy Backend (Supabase Edge Functions)
+
+on:
+  push:
+    branches:
+      - main
+      - master
+    paths:
+      - 'supabase/**'
+      - '.github/workflows/deploy-backend.yml'
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    name: Deploy Edge Functions
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Supabase CLI
+        uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Link Supabase project
+        run: |
+          supabase link --project-ref ${{ secrets.SUPABASE_PROJECT_ID }}
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+
+      - name: Deploy Edge Functions
+        run: |
+          supabase functions deploy process-text
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+
+      - name: Set function secrets
+        run: |
+          supabase secrets set OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }} --project-ref ${{ secrets.SUPABASE_PROJECT_ID }}
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+
+      - name: Notify deployment success
+        if: success()
+        run: |
+          echo "✅ Backend deployed successfully!"
+          echo "Edge Function URL: https://${{ secrets.SUPABASE_PROJECT_ID }}.supabase.co/functions/v1/process-text"
+
+      - name: Notify deployment failure
+        if: failure()
+        run: |
+          echo "❌ Backend deployment failed!"
+          exit 1

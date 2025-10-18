@@ -71,6 +71,9 @@ class SupabaseAuth {
         console.log('✅ Supabase is initialized, starting OAuth flow');
 
         return new Promise((resolve, reject) => {
+            // Note: No keepalive needed when running in background service worker
+            // Service workers stay alive during async operations like OAuth
+
             // Get manifest for OAuth configuration
             const manifest = chrome.runtime.getManifest();
 
