@@ -93,29 +93,36 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
     });
 
-    // Listen for storage changes to update UI when session changes
-    // This handles the case where popup was closed during OAuth
+    // Listen for storage changes to update UI when session or usage changes
+    // This handles the case where popup was closed during OAuth or usage updated from background
     chrome.storage.onChanged.addListener(async (changes, namespace) => {
-        if (namespace === 'local' && changes.supabase_session) {
-            console.log('🔄 Session changed in storage, updating UI');
+        if (namespace === 'local') {
+            if (changes.supabase_session) {
+                console.log('🔄 Session changed in storage, updating UI');
 
-            if (changes.supabase_session.newValue) {
-                // Session was added/updated - restore it
-                if (supabaseAuth) {
-                    const restored = await supabaseAuth.restoreSession();
-                    if (restored) {
-                        console.log('✅ Session restored from storage change');
-                        updateAuthUI();
+                if (changes.supabase_session.newValue) {
+                    // Session was added/updated - restore it
+                    if (supabaseAuth) {
+                        const restored = await supabaseAuth.restoreSession();
+                        if (restored) {
+                            console.log('✅ Session restored from storage change');
+                            updateAuthUI();
+                        }
                     }
+                } else {
+                    // Session was removed - update UI to show logged out state
+                    console.log('🔄 Session removed from storage');
+                    if (supabaseAuth) {
+                        supabaseAuth.session = null;
+                        supabaseAuth.currentUser = null;
+                    }
+                    updateAuthUI();
                 }
-            } else {
-                // Session was removed - update UI to show logged out state
-                console.log('🔄 Session removed from storage');
-                if (supabaseAuth) {
-                    supabaseAuth.session = null;
-                    supabaseAuth.currentUser = null;
-                }
-                updateAuthUI();
+            }
+
+            if (changes.usage_info) {
+                console.log('🔄 Usage info changed in storage, updating UI');
+                updateUsageDisplay();
             }
         }
     });
@@ -237,9 +244,12 @@ function updateAuthUI() {
                 userAvatar.style.display = 'none';
             }
         }
+
+        // Update usage stats for authenticated users
+        updateUsageDisplay();
     } else {
         console.log('❌ User is not authenticated, showing login section');
-        
+
         // Show login section, hide user section
         loginSection.style.display = 'block';
         userSection.style.display = 'none';
@@ -270,4 +280,57 @@ function showMessage(text, type) {
     setTimeout(() => {
         messageDiv.style.display = 'none';
     }, 3000);
+}
+
+// Update usage display
+async function updateUsageDisplay() {
+    const usageStats = document.getElementById('usageStats');
+    const usageBar = document.getElementById('usageBar');
+    const usageText = document.getElementById('usageText');
+
+    try {
+        // Get usage info from storage
+        const { usage_info } = await chrome.storage.local.get('usage_info');
+
+        if (usage_info && usage_info.usageCount !== undefined) {
+            // Show usage stats
+            usageStats.style.display = 'block';
+
+            // Calculate percentage
+            const percentage = (usage_info.usageCount / usage_info.limit) * 100;
+
+            // Update bar width
+            usageBar.style.width = `${percentage}%`;
+
+            // Set bar color based on usage level
+            let usageLevel;
+            if (percentage < 50) {
+                usageLevel = 'low';
+            } else if (percentage < 75) {
+                usageLevel = 'medium';
+            } else if (percentage < 90) {
+                usageLevel = 'high';
+            } else {
+                usageLevel = 'critical';
+            }
+            usageBar.setAttribute('data-usage', usageLevel);
+
+            // Update text
+            usageText.textContent = `${usage_info.usageCount} / ${usage_info.limit} requests used this month`;
+
+            console.log('📊 Usage display updated:', {
+                count: usage_info.usageCount,
+                limit: usage_info.limit,
+                percentage: percentage.toFixed(1) + '%',
+                level: usageLevel
+            });
+        } else {
+            // No usage info yet, hide stats
+            usageStats.style.display = 'none';
+            console.log('📊 No usage info available yet');
+        }
+    } catch (error) {
+        console.error('Failed to update usage display:', error);
+        usageStats.style.display = 'none';
+    }
 }

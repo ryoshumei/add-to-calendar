@@ -311,15 +311,35 @@ async function processWithBackend(text, accessToken) {
 
         if (!response.ok) {
             const errorData = await response.json();
+
+            // Check if it's a usage limit error
+            if (errorData.error && errorData.error.includes('Monthly limit exceeded')) {
+                // Don't fall back to basic for limit errors - let user know they need to upgrade or wait
+                throw new Error(errorData.error);
+            }
+
             throw new Error(errorData.error || `Backend processing failed: ${response.status}`);
         }
 
         const data = await response.json();
         console.log('Backend processing successful:', data.eventDetails);
+
+        // Store usage information if present
+        if (data.usage) {
+            console.log(`Usage: ${data.usage.usageCount}/${data.usage.limit} for ${data.usage.yearMonth}`);
+            await chrome.storage.local.set({ usage_info: data.usage });
+        }
+
         return data.eventDetails;
     } catch (error) {
         console.error('Backend processing error:', error);
-        // Fallback to basic event creation
+
+        // Don't fall back for usage limit errors - propagate them
+        if (error.message && error.message.includes('Monthly limit exceeded')) {
+            throw error;
+        }
+
+        // For other errors, fallback to basic event creation
         console.log('Falling back to basic event creation...');
         return createBasicEventFromText(text);
     }

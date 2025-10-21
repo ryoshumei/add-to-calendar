@@ -17,6 +17,14 @@ interface EventDetails {
   location?: string;
 }
 
+interface UsageInfo {
+  usageCount: number;
+  limit: number;
+  yearMonth: string;
+}
+
+const MONTHLY_LIMIT = 50;
+
 serve(async (req) => {
   // Handle CORS preflight requests
   if (req.method === 'OPTIONS') {
@@ -44,6 +52,14 @@ serve(async (req) => {
 
     console.log(`Processing text for user: ${user.email}`)
 
+    // Check and increment usage - must be done before processing
+    const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
+    if (!serviceRoleKey) {
+      throw new Error('SUPABASE_SERVICE_ROLE_KEY not configured')
+    }
+
+    const usageInfo = await checkAndIncrementUsage(user.id, serviceRoleKey)
+
     // Get request body
     const { selectedText } = await req.json()
     if (!selectedText) {
@@ -60,7 +76,10 @@ serve(async (req) => {
     const eventDetails = await processWithOpenAI(selectedText, openaiApiKey)
 
     return new Response(
-      JSON.stringify({ eventDetails }),
+      JSON.stringify({
+        eventDetails,
+        usage: usageInfo
+      }),
       {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         status: 200
@@ -172,5 +191,77 @@ function validateEventDetails(details: EventDetails) {
   // Ensure start time is before end time
   if (new Date(details.startTime) >= new Date(details.endTime)) {
     throw new Error('Start time must be before end time')
+  }
+}
+
+/**
+ * Check and increment usage for a user
+ * Returns current usage info and throws if limit exceeded
+ */
+async function checkAndIncrementUsage(userId: string, serviceRoleKey: string): Promise<UsageInfo> {
+  // Create service role client to bypass RLS
+  const supabaseAdmin = createClient(
+    Deno.env.get('SUPABASE_URL') ?? '',
+    serviceRoleKey,
+    {
+      auth: {
+        autoRefreshToken: false,
+        persistSession: false
+      }
+    }
+  )
+
+  // Get current year-month (e.g., "2025-10")
+  const now = new Date()
+  const yearMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
+
+  // Get current usage for this user and month
+  const { data: existingUsage, error: fetchError } = await supabaseAdmin
+    .from('usage_tracking')
+    .select('usage_count')
+    .eq('user_id', userId)
+    .eq('year_month', yearMonth)
+    .single()
+
+  if (fetchError && fetchError.code !== 'PGRST116') { // PGRST116 = not found
+    console.error('Error fetching usage:', fetchError)
+    throw new Error('Failed to check usage limit')
+  }
+
+  const currentUsage = existingUsage?.usage_count || 0
+
+  // Check if limit exceeded
+  if (currentUsage >= MONTHLY_LIMIT) {
+    const usageInfo: UsageInfo = {
+      usageCount: currentUsage,
+      limit: MONTHLY_LIMIT,
+      yearMonth
+    }
+    throw new Error(`Monthly limit exceeded. You have used ${currentUsage}/${MONTHLY_LIMIT} requests this month.`)
+  }
+
+  // Increment usage (upsert: insert if not exists, update if exists)
+  const newCount = currentUsage + 1
+  const { error: upsertError } = await supabaseAdmin
+    .from('usage_tracking')
+    .upsert({
+      user_id: userId,
+      year_month: yearMonth,
+      usage_count: newCount
+    }, {
+      onConflict: 'user_id,year_month'
+    })
+
+  if (upsertError) {
+    console.error('Error updating usage:', upsertError)
+    throw new Error('Failed to update usage tracking')
+  }
+
+  console.log(`Usage updated for user ${userId}: ${newCount}/${MONTHLY_LIMIT}`)
+
+  return {
+    usageCount: newCount,
+    limit: MONTHLY_LIMIT,
+    yearMonth
   }
 }

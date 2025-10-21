@@ -32,11 +32,28 @@ export interface ProcessTextRequest {
 }
 
 /**
+ * Usage information for monthly limits
+ */
+export interface UsageInfo {
+  /** Current usage count for the month */
+  usageCount: number;
+
+  /** Monthly usage limit */
+  limit: number;
+
+  /** Year-month in format YYYY-MM */
+  yearMonth: string;
+}
+
+/**
  * Response payload from process-text Edge Function
  */
 export interface ProcessTextResponse {
   /** Extracted event details */
   eventDetails: EventDetails;
+
+  /** Usage information (only present for authenticated backend processing) */
+  usage?: UsageInfo;
 }
 
 /**
