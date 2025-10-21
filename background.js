@@ -1,4 +1,52 @@
 // background.js
+
+// Import configuration and services
+importScripts('config.js');
+importScripts('scripts/supabase-js.min.js'); // Supabase JavaScript client library
+importScripts('scripts/supabase-client.js');
+importScripts('scripts/calendar-service.js');
+
+// Global authentication state
+let supabaseAuth = null;
+let calendarService = null;
+let currentUser = null;
+
+// Initialize immediately when service worker loads
+// This ensures auth is ready when messages arrive
+console.log('🚀 Service worker starting, initializing auth...');
+
+// Initialize authentication on startup
+async function initializeAuth() {
+    try {
+        console.log('🔄 Initializing authentication...');
+        supabaseAuth = new SupabaseAuth();
+        await supabaseAuth.initialize();
+        await supabaseAuth.restoreSession();
+
+        calendarService = new CalendarService(supabaseAuth);
+
+        if (supabaseAuth.isAuthenticated()) {
+            currentUser = supabaseAuth.currentUser;
+            console.log('User authenticated:', currentUser?.email);
+        }
+        console.log('✅ Authentication initialized successfully');
+    } catch (error) {
+        console.error('❌ Failed to initialize authentication:', error);
+    }
+}
+
+// Ensure authentication is initialized (for service worker wake-ups)
+async function ensureAuthInitialized() {
+    if (!supabaseAuth) {
+        console.log('⚠️ Auth not initialized, initializing now...');
+        await initializeAuth();
+    }
+    return supabaseAuth !== null;
+}
+
+// Initialize authentication immediately when service worker loads
+initializeAuth();
+
 // Create context menu when extension is installed
 chrome.runtime.onInstalled.addListener(() => {
     chrome.contextMenus.create({
@@ -6,6 +54,125 @@ chrome.runtime.onInstalled.addListener(() => {
         title: "Add to Google Calendar",
         contexts: ["selection"]
     });
+
+    // Initialize authentication
+    initializeAuth();
+});
+
+// Handle startup
+chrome.runtime.onStartup.addListener(() => {
+    initializeAuth();
+});
+
+// Handle messages from popup
+chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+    if (request.action === 'signInWithGoogle') {
+        // Handle Google sign in from popup
+        console.log('🔵 Received signInWithGoogle request from popup');
+
+        // Ensure auth is initialized before processing
+        ensureAuthInitialized()
+            .then(initialized => {
+                if (!initialized || !supabaseAuth) {
+                    sendResponse({ success: false, error: 'Authentication service not available' });
+                    return;
+                }
+
+                // Perform OAuth in background (keeps running even if popup closes)
+                return supabaseAuth.signInWithGoogle();
+            })
+            .then(result => {
+                if (!result) return; // Error was already sent
+
+                console.log('✅ Background OAuth successful:', result.user?.email);
+                currentUser = result.user;
+
+                // Reinitialize calendar service with authenticated user
+                calendarService = new CalendarService(supabaseAuth);
+
+                sendResponse({
+                    success: true,
+                    user: result.user,
+                    session: result.session
+                });
+            })
+            .catch(error => {
+                console.error('❌ Background OAuth failed:', error);
+                sendResponse({
+                    success: false,
+                    error: error.message
+                });
+            });
+
+        return true; // Keep channel open for async response
+    } else if (request.action === 'signOut') {
+        // Handle sign out from popup
+        console.log('🔵 Received signOut request from popup');
+
+        // Ensure auth is initialized before processing
+        ensureAuthInitialized()
+            .then(initialized => {
+                if (!initialized || !supabaseAuth) {
+                    sendResponse({ success: false, error: 'Authentication service not available' });
+                    return Promise.resolve(false);
+                }
+
+                return supabaseAuth.signOut();
+            })
+            .then(success => {
+                if (success === false) return; // Error was already sent
+
+                if (success) {
+                    currentUser = null;
+                    console.log('✅ User signed out');
+                    sendResponse({ success: true });
+                } else {
+                    sendResponse({ success: false, error: 'Sign out failed' });
+                }
+            })
+            .catch(error => {
+                console.error('❌ Sign out error:', error);
+                sendResponse({ success: false, error: error.message });
+            });
+
+        return true; // Keep channel open for async response
+    } else if (request.action === 'getAuthState') {
+        // Return current authentication state
+        console.log('🔍 Popup requesting auth state');
+
+        // Ensure auth is initialized before checking state
+        ensureAuthInitialized()
+            .then(() => {
+                sendResponse({
+                    isAuthenticated: supabaseAuth?.isAuthenticated() || false,
+                    user: currentUser
+                });
+            })
+            .catch(error => {
+                console.error('❌ Error getting auth state:', error);
+                sendResponse({
+                    isAuthenticated: false,
+                    user: null
+                });
+            });
+
+        return true; // Keep channel open for async response
+    } else if (request.action === 'userAuthenticated') {
+        currentUser = request.user;
+        console.log('User authenticated via popup:', currentUser?.email);
+
+        // Reinitialize calendar service with authenticated user
+        if (supabaseAuth) {
+            calendarService = new CalendarService(supabaseAuth);
+        }
+
+        sendResponse({ success: true });
+    } else if (request.action === 'userSignedOut') {
+        currentUser = null;
+        console.log('User signed out');
+        sendResponse({ success: true });
+    }
+    return true; // Keep the message channel open for async response
 });
 
 // Store active requests to prevent duplicates
@@ -27,23 +194,54 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
             // Mark this tab as having an active request
             activeRequests.add(tab.id);
 
-            // Get API key
-            const {apiKey} = await chrome.storage.sync.get("apiKey");
-
-            if (!apiKey) {
-                chrome.notifications.create({
-                    type: 'basic',
-                    iconUrl: 'icons/icon128.png',
-                    title: 'Calendar Event Creator',
-                    message: 'Please set your OpenAI API key in the extension settings'
-                });
-                return;
-            }
-
-            // Process the selected text
             const selectedText = info.selectionText;
-            const eventDetails = await processWithOpenAI(selectedText, apiKey);
-            const calendarUrl = createGoogleCalendarUrl(eventDetails);
+            let eventDetails;
+            let result;
+
+            // Check if user is authenticated
+            if (currentUser && supabaseAuth?.isAuthenticated()) {
+                console.log('User authenticated, checking processing method...');
+
+                // Priority 1: Check if user has their own OpenAI API key
+                const {apiKey} = await chrome.storage.sync.get("apiKey");
+                if (apiKey) {
+                    // Use user's API key (they prefer their own key)
+                    console.log('Using user\'s OpenAI API key');
+                    eventDetails = await processWithOpenAI(selectedText, apiKey);
+                } else {
+                    // Priority 2: Use backend service with our API key
+                    console.log('Using backend service');
+                    eventDetails = await processWithBackend(selectedText, supabaseAuth.getAccessToken());
+                }
+
+                // Use calendar service for authenticated event creation
+                result = await calendarService.processEventCreation(eventDetails, selectedText);
+                console.log('Calendar service result:', result);
+
+            } else {
+                console.log('User not authenticated, using API key fallback...');
+
+                // Get API key for fallback processing
+                const {apiKey} = await chrome.storage.sync.get("apiKey");
+
+                if (!apiKey) {
+                    chrome.notifications.create({
+                        type: 'basic',
+                        iconUrl: 'icons/icon128.png',
+                        title: 'Calendar Event Creator',
+                        message: 'Please sign in with Google or set your OpenAI API key in extension settings'
+                    });
+                    return;
+                }
+
+                // Process with OpenAI and create calendar URL
+                eventDetails = await processWithOpenAI(selectedText, apiKey);
+                result = {
+                    method: 'url',
+                    calendarUrl: createGoogleCalendarUrl(eventDetails),
+                    message: 'Click to add event to your Google Calendar'
+                };
+            }
 
             // Try to send message to content script
             try {
@@ -51,7 +249,8 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
                     type: "SHOW_CONFIRMATION",
                     requestId,
                     eventDetails,
-                    calendarUrl
+                    calendarUrl: result.calendarUrl,
+                    result: result
                 });
 
                 // If we get here, the content script handled the message
@@ -72,11 +271,14 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
                         type: "SHOW_CONFIRMATION",
                         requestId,
                         eventDetails,
-                        calendarUrl
+                         calendarUrl: result.calendarUrl,
+                        result: result
                     });
                 } catch (retryError) {
                     // If it still fails, open calendar directly
-                    chrome.tabs.create({url: calendarUrl});
+                    if (result.calendarUrl) {
+                        chrome.tabs.create({url: result.calendarUrl});
+                    }
                 }
             }
         } catch (error) {
@@ -94,6 +296,55 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
     }
 });
 
+// Process text with backend service
+async function processWithBackend(text, accessToken) {
+    try {
+        console.log('Calling backend service...');
+        const response = await fetch(CONFIG.EDGE_FUNCTIONS.PROCESS_TEXT, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${accessToken}`,
+            },
+            body: JSON.stringify({ selectedText: text })
+        });
+
+        if (!response.ok) {
+            const errorData = await response.json();
+
+            // Check if it's a usage limit error
+            if (errorData.error && errorData.error.includes('Monthly limit exceeded')) {
+                // Don't fall back to basic for limit errors - let user know they need to upgrade or wait
+                throw new Error(errorData.error);
+            }
+
+            throw new Error(errorData.error || `Backend processing failed: ${response.status}`);
+        }
+
+        const data = await response.json();
+        console.log('Backend processing successful:', data.eventDetails);
+
+        // Store usage information if present
+        if (data.usage) {
+            console.log(`Usage: ${data.usage.usageCount}/${data.usage.limit} for ${data.usage.yearMonth}`);
+            await chrome.storage.local.set({ usage_info: data.usage });
+        }
+
+        return data.eventDetails;
+    } catch (error) {
+        console.error('Backend processing error:', error);
+
+        // Don't fall back for usage limit errors - propagate them
+        if (error.message && error.message.includes('Monthly limit exceeded')) {
+            throw error;
+        }
+
+        // For other errors, fallback to basic event creation
+        console.log('Falling back to basic event creation...');
+        return createBasicEventFromText(text);
+    }
+}
+
 // Process text with OpenAI API
 async function processWithOpenAI(text, apiKey) {
     const now = new Date();
@@ -105,7 +356,7 @@ async function processWithOpenAI(text, apiKey) {
         "description": "brief description",
         "startTime": "YYYY-MM-DDTHH:mm:ss",
         "endTime": "YYYY-MM-DDTHH:mm:ss",
-        "location": "location if mentioned"
+        "location": "location if mentioned, include online link if available"
     }
     Current time is: ${currentDateTime}
     For relative dates, use the current time as reference.
@@ -121,7 +372,7 @@ async function processWithOpenAI(text, apiKey) {
                 'Authorization': `Bearer ${apiKey}`
             },
             body: JSON.stringify({
-                model: 'gpt-4o',
+                model: 'gpt-4.1-mini',
                 messages: [
                     {
                         role: 'system',
@@ -193,6 +444,28 @@ function createGoogleCalendarUrl(eventDetails) {
         console.error('Error creating calendar URL:', error);
         throw new Error('Failed to create calendar URL: ' + error.message);
     }
+}
+
+// Create basic event from text (fallback when no API key available)
+function createBasicEventFromText(text) {
+    const now = new Date();
+    const tomorrow = new Date(now);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+
+    // Set default time to 10:00 AM tomorrow for 1 hour
+    const startTime = new Date(tomorrow);
+    startTime.setHours(10, 0, 0, 0);
+
+    const endTime = new Date(startTime);
+    endTime.setHours(11, 0, 0, 0);
+
+    return {
+        title: text.substring(0, 100) + (text.length > 100 ? '...' : ''), // Truncate long text
+        description: `Event created from selected text: "${text}"`,
+        startTime: startTime.toISOString().slice(0, 19), // Format: YYYY-MM-DDTHH:mm:ss
+        endTime: endTime.toISOString().slice(0, 19),
+        location: ''
+    };
 }
 
 // Validate event details

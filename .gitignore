@@ -55,3 +55,27 @@ Thumbs.db
 .yarn-integrity
 .eslintcache
 .svg
+
+*.zip
+
+private/
+/playwright-report/
+/tests/
+/playwright.config.js
+/calendar.svg
+/package.json
+
+# Supabase
+.branches
+.temp
+supabase/.env
+supabase/.temp
+supabase/functions/**/.env
+supabase/functions/**/.temp
+
+# Local development
+local-docs/
+
+# MCP Servers
+.playwright-mcp/
+.serena/

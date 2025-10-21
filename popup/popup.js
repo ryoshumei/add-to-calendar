@@ -1,14 +1,62 @@
-
 // popup/popup.js
-document.addEventListener('DOMContentLoaded', () => {
+
+// Global variables for authentication
+let supabaseAuth = null;
+
+document.addEventListener('DOMContentLoaded', async () => {
+    // DOM elements
     const apiKeyInput = document.getElementById('apiKey');
     const saveButton = document.getElementById('saveButton');
     const deleteButton = document.getElementById('deleteButton');
     const messageDiv = document.getElementById('message');
     const togglePasswordButton = document.getElementById('togglePassword');
 
+    // Authentication elements
+    const googleSignInBtn = document.getElementById('googleSignInBtn');
+    const signOutBtn = document.getElementById('signOutBtn');
+    const loginSection = document.getElementById('loginSection');
+    const userSection = document.getElementById('userSection');
+    const userName = document.getElementById('userName');
+    const userEmail = document.getElementById('userEmail');
+    const userAvatar = document.getElementById('userAvatar');
+
+    // Initialize Supabase authentication
+    try {
+        if (typeof SupabaseAuth !== 'undefined') {
+            console.log('🔵 Initializing Supabase authentication...');
+            supabaseAuth = new SupabaseAuth();
+            await supabaseAuth.initialize();
+            console.log('✅ Supabase initialized');
+
+            // Try to restore existing session
+            const restored = await supabaseAuth.restoreSession();
+            console.log('🔄 Session restore result:', restored);
+            console.log('🔍 Auth state after restore:', {
+                isAuthenticated: supabaseAuth.isAuthenticated(),
+                hasUser: !!supabaseAuth.currentUser,
+                userEmail: supabaseAuth.currentUser?.email
+            });
+            
+            updateAuthUI();
+        } else {
+            console.warn('Supabase authentication not available - falling back to API key only');
+        }
+    } catch (error) {
+        console.error('Failed to initialize Supabase auth:', error);
+        showMessage('Authentication service unavailable', 'error');
+    }
+
     // Load saved API key
     loadApiKey();
+
+    // Authentication event listeners
+    if (googleSignInBtn) {
+        googleSignInBtn.addEventListener('click', handleGoogleSignIn);
+    }
+
+    if (signOutBtn) {
+        signOutBtn.addEventListener('click', handleSignOut);
+    }
 
     // Toggle password visibility
     togglePasswordButton.addEventListener('click', () => {
@@ -44,7 +92,169 @@ document.addEventListener('DOMContentLoaded', () => {
             showMessage('Delete failed: ' + error.message, 'error');
         }
     });
+
+    // Listen for storage changes to update UI when session or usage changes
+    // This handles the case where popup was closed during OAuth or usage updated from background
+    chrome.storage.onChanged.addListener(async (changes, namespace) => {
+        if (namespace === 'local') {
+            if (changes.supabase_session) {
+                console.log('🔄 Session changed in storage, updating UI');
+
+                if (changes.supabase_session.newValue) {
+                    // Session was added/updated - restore it
+                    if (supabaseAuth) {
+                        const restored = await supabaseAuth.restoreSession();
+                        if (restored) {
+                            console.log('✅ Session restored from storage change');
+                            updateAuthUI();
+                        }
+                    }
+                } else {
+                    // Session was removed - update UI to show logged out state
+                    console.log('🔄 Session removed from storage');
+                    if (supabaseAuth) {
+                        supabaseAuth.session = null;
+                        supabaseAuth.currentUser = null;
+                    }
+                    updateAuthUI();
+                }
+            }
+
+            if (changes.usage_info) {
+                console.log('🔄 Usage info changed in storage, updating UI');
+                updateUsageDisplay();
+            }
+        }
+    });
 });
+
+// Handle Google Sign In
+async function handleGoogleSignIn() {
+    console.log('🔵 handleGoogleSignIn() called in popup');
+
+    try {
+        showMessage('Signing in...', 'success');
+
+        // Send message to background script to handle OAuth
+        // This way OAuth continues even if popup closes
+        const response = await chrome.runtime.sendMessage({
+            action: 'signInWithGoogle'
+        });
+
+        console.log('✅ Background response:', response);
+
+        if (response.success) {
+            console.log('✅ Sign in successful:', response.user?.email);
+            showMessage('Successfully signed in!', 'success');
+
+            // Update local state
+            if (supabaseAuth && response.user && response.session) {
+                supabaseAuth.session = response.session;
+                supabaseAuth.currentUser = response.user;
+            }
+
+            // Update UI
+            updateAuthUI();
+        } else {
+            throw new Error(response.error || 'Sign in failed');
+        }
+    } catch (error) {
+        console.error('Google sign in failed:', error);
+        showMessage('Sign in failed: ' + error.message, 'error');
+    }
+}
+
+// Handle Sign Out
+async function handleSignOut() {
+    console.log('🔵 handleSignOut() called in popup');
+
+    try {
+        // Send message to background script to handle sign out
+        const response = await chrome.runtime.sendMessage({
+            action: 'signOut'
+        });
+
+        console.log('✅ Background sign out response:', response);
+
+        if (response.success) {
+            console.log('✅ Sign out successful');
+            showMessage('Successfully signed out', 'success');
+
+            // Update local state
+            if (supabaseAuth) {
+                supabaseAuth.session = null;
+                supabaseAuth.currentUser = null;
+            }
+
+            // Update UI
+            updateAuthUI();
+        } else {
+            throw new Error(response.error || 'Sign out failed');
+        }
+    } catch (error) {
+        console.error('Sign out failed:', error);
+        showMessage('Sign out failed: ' + error.message, 'error');
+    }
+}
+
+// Update authentication UI based on current state
+function updateAuthUI() {
+    console.log('🔄 updateAuthUI() called');
+    
+    const loginSection = document.getElementById('loginSection');
+    const userSection = document.getElementById('userSection');
+    const userName = document.getElementById('userName');
+    const userEmail = document.getElementById('userEmail');
+    const userAvatar = document.getElementById('userAvatar');
+
+    // Check authentication state
+    const isAuthenticated = supabaseAuth && supabaseAuth.isAuthenticated();
+    console.log('🔍 Authentication state:', {
+        hasSupabaseAuth: !!supabaseAuth,
+        isAuthenticated: isAuthenticated,
+        currentUser: supabaseAuth?.currentUser?.email || 'none'
+    });
+
+    if (isAuthenticated) {
+        console.log('✅ User is authenticated, showing user section');
+        
+        // Show user section, hide login section
+        loginSection.style.display = 'none';
+        userSection.style.display = 'block';
+
+        // Update user information
+        const user = supabaseAuth.currentUser;
+        if (user) {
+            console.log('👤 User data:', {
+                email: user.email,
+                name: user.user_metadata?.full_name,
+                avatar: user.user_metadata?.avatar_url || user.user_metadata?.picture
+            });
+            
+            userName.textContent = user.user_metadata?.full_name || user.email?.split('@')[0] || 'User';
+            userEmail.textContent = user.email || '';
+
+            // Set user avatar
+            const avatarUrl = user.user_metadata?.avatar_url || user.user_metadata?.picture;
+            if (avatarUrl) {
+                userAvatar.src = avatarUrl;
+                userAvatar.style.display = 'block';
+            } else {
+                // Use default avatar with user's initials
+                userAvatar.style.display = 'none';
+            }
+        }
+
+        // Update usage stats for authenticated users
+        updateUsageDisplay();
+    } else {
+        console.log('❌ User is not authenticated, showing login section');
+
+        // Show login section, hide user section
+        loginSection.style.display = 'block';
+        userSection.style.display = 'none';
+    }
+}
 
 // Load saved API key
 async function loadApiKey() {
@@ -70,4 +280,59 @@ function showMessage(text, type) {
     setTimeout(() => {
         messageDiv.style.display = 'none';
     }, 3000);
+}
+
+// Update usage display
+async function updateUsageDisplay() {
+    const usageStats = document.getElementById('usageStats');
+    const usageBar = document.getElementById('usageBar');
+    const usageText = document.getElementById('usageText');
+
+    try {
+        // Get usage info from storage
+        const { usage_info } = await chrome.storage.local.get('usage_info');
+
+        // Always show usage stats for authenticated users
+        usageStats.style.display = 'block';
+
+        // Default to 0/50 if no usage info yet
+        const usageCount = usage_info?.usageCount ?? 0;
+        const limit = usage_info?.limit ?? 50;
+
+        // Calculate percentage
+        const percentage = (usageCount / limit) * 100;
+
+        // Update bar width
+        usageBar.style.width = `${percentage}%`;
+
+        // Set bar color based on usage level
+        let usageLevel;
+        if (percentage < 50) {
+            usageLevel = 'low';
+        } else if (percentage < 75) {
+            usageLevel = 'medium';
+        } else if (percentage < 90) {
+            usageLevel = 'high';
+        } else {
+            usageLevel = 'critical';
+        }
+        usageBar.setAttribute('data-usage', usageLevel);
+
+        // Update text
+        usageText.textContent = `${usageCount} / ${limit} requests used this month`;
+
+        console.log('📊 Usage display updated:', {
+            count: usageCount,
+            limit: limit,
+            percentage: percentage.toFixed(1) + '%',
+            level: usageLevel
+        });
+    } catch (error) {
+        console.error('Failed to update usage display:', error);
+        // Even on error, show default 0/50
+        usageStats.style.display = 'block';
+        usageBar.style.width = '0%';
+        usageBar.setAttribute('data-usage', 'low');
+        usageText.textContent = '0 / 50 requests used this month';
+    }
 }
