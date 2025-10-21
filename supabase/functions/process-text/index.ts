@@ -242,22 +242,32 @@ async function checkAndIncrementUsage(userId: string, serviceRoleKey: string): P
 
   // Increment usage (upsert: insert if not exists, update if exists)
   const newCount = currentUsage + 1
-  const { error: upsertError } = await supabaseAdmin
+
+  console.log(`Attempting to upsert usage for user ${userId}: ${currentUsage} -> ${newCount}`)
+
+  const { data: upsertedData, error: upsertError } = await supabaseAdmin
     .from('usage_tracking')
     .upsert({
       user_id: userId,
       year_month: yearMonth,
-      usage_count: newCount
+      usage_count: newCount,
+      updated_at: new Date().toISOString()
     }, {
       onConflict: 'user_id,year_month'
     })
+    .select()
+    .single()
 
   if (upsertError) {
     console.error('Error updating usage:', upsertError)
-    throw new Error('Failed to update usage tracking')
+    throw new Error('Failed to update usage tracking: ' + upsertError.message)
   }
 
-  console.log(`Usage updated for user ${userId}: ${newCount}/${MONTHLY_LIMIT}`)
+  console.log(`✅ Usage updated successfully for user ${userId}:`, {
+    oldCount: currentUsage,
+    newCount: newCount,
+    dbRecord: upsertedData
+  })
 
   return {
     usageCount: newCount,
