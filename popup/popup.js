@@ -292,45 +292,47 @@ async function updateUsageDisplay() {
         // Get usage info from storage
         const { usage_info } = await chrome.storage.local.get('usage_info');
 
-        if (usage_info && usage_info.usageCount !== undefined) {
-            // Show usage stats
-            usageStats.style.display = 'block';
+        // Always show usage stats for authenticated users
+        usageStats.style.display = 'block';
 
-            // Calculate percentage
-            const percentage = (usage_info.usageCount / usage_info.limit) * 100;
+        // Default to 0/50 if no usage info yet
+        const usageCount = usage_info?.usageCount ?? 0;
+        const limit = usage_info?.limit ?? 50;
 
-            // Update bar width
-            usageBar.style.width = `${percentage}%`;
+        // Calculate percentage
+        const percentage = (usageCount / limit) * 100;
 
-            // Set bar color based on usage level
-            let usageLevel;
-            if (percentage < 50) {
-                usageLevel = 'low';
-            } else if (percentage < 75) {
-                usageLevel = 'medium';
-            } else if (percentage < 90) {
-                usageLevel = 'high';
-            } else {
-                usageLevel = 'critical';
-            }
-            usageBar.setAttribute('data-usage', usageLevel);
+        // Update bar width
+        usageBar.style.width = `${percentage}%`;
 
-            // Update text
-            usageText.textContent = `${usage_info.usageCount} / ${usage_info.limit} requests used this month`;
-
-            console.log('📊 Usage display updated:', {
-                count: usage_info.usageCount,
-                limit: usage_info.limit,
-                percentage: percentage.toFixed(1) + '%',
-                level: usageLevel
-            });
+        // Set bar color based on usage level
+        let usageLevel;
+        if (percentage < 50) {
+            usageLevel = 'low';
+        } else if (percentage < 75) {
+            usageLevel = 'medium';
+        } else if (percentage < 90) {
+            usageLevel = 'high';
         } else {
-            // No usage info yet, hide stats
-            usageStats.style.display = 'none';
-            console.log('📊 No usage info available yet');
+            usageLevel = 'critical';
         }
+        usageBar.setAttribute('data-usage', usageLevel);
+
+        // Update text
+        usageText.textContent = `${usageCount} / ${limit} requests used this month`;
+
+        console.log('📊 Usage display updated:', {
+            count: usageCount,
+            limit: limit,
+            percentage: percentage.toFixed(1) + '%',
+            level: usageLevel
+        });
     } catch (error) {
         console.error('Failed to update usage display:', error);
-        usageStats.style.display = 'none';
+        // Even on error, show default 0/50
+        usageStats.style.display = 'block';
+        usageBar.style.width = '0%';
+        usageBar.setAttribute('data-usage', 'low');
+        usageText.textContent = '0 / 50 requests used this month';
     }
 }
