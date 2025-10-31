@@ -30,12 +30,54 @@ class SupabaseAuth {
             this.supabase = createClientFunc(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_ANON_KEY);
             console.log('✅ Supabase client created');
             
+            // Set up auth state change listener to automatically persist session updates
+            this.setupAuthListener();
+            
             // Don't call getSession here - let restoreSession handle it
             // This prevents overwriting the restored session
         } else {
             console.error('❌ Supabase library or CONFIG not loaded');
             throw new Error('Supabase library or CONFIG not loaded');
         }
+    }
+
+    // Set up auth state change listener to persist session updates
+    setupAuthListener() {
+        if (!this.supabase) {
+            console.error('❌ Cannot setup auth listener: Supabase not initialized');
+            return;
+        }
+
+        console.log('🔵 Setting up auth state change listener...');
+        
+        this.supabase.auth.onAuthStateChange(async (event, session) => {
+            console.log('🔔 Auth state changed:', event, {
+                hasSession: !!session,
+                userEmail: session?.user?.email
+            });
+
+            // Update internal state
+            this.session = session;
+            this.currentUser = session?.user || null;
+
+            // Persist session changes to storage
+            // Only update storage for meaningful events, not INITIAL_SESSION
+            if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
+                if (session) {
+                    await chrome.storage.local.set({
+                        supabase_session: session
+                    });
+                    console.log('✅ Session updated in storage');
+                }
+            } else if (event === 'SIGNED_OUT') {
+                // Clear session from storage only on explicit sign out
+                await chrome.storage.local.remove(['supabase_session']);
+                console.log('🗑️ Session cleared from storage');
+            }
+            // Ignore INITIAL_SESSION and other events - let restoreSession handle initial state
+        });
+
+        console.log('✅ Auth state change listener setup complete');
     }
 
     // Get current session
@@ -218,19 +260,30 @@ class SupabaseAuth {
                 if (!error && data.session) {
                     this.session = data.session;
                     this.currentUser = data.user;
-                    console.log('✅ Session restored successfully:', {
+                    
+                    // IMPORTANT: Save the refreshed session back to storage
+                    // setSession() may have refreshed the access token, so we need to persist it
+                    await chrome.storage.local.set({
+                        supabase_session: data.session
+                    });
+                    
+                    console.log('✅ Session restored and updated in storage:', {
                         userEmail: data.user?.email,
                         userId: data.user?.id
                     });
                     return true;
                 } else {
                     console.log('❌ Session restore failed:', error);
+                    // Clear invalid session from storage
+                    await chrome.storage.local.remove(['supabase_session']);
                 }
             } else {
                 console.log('ℹ️ No stored session found');
             }
         } catch (error) {
             console.error('❌ Error restoring session:', error);
+            // Clear potentially corrupted session
+            await chrome.storage.local.remove(['supabase_session']);
         }
 
         return false;

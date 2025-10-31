@@ -27,7 +27,10 @@ async function initializeAuth() {
 
         if (supabaseAuth.isAuthenticated()) {
             currentUser = supabaseAuth.currentUser;
-            console.log('User authenticated:', currentUser?.email);
+            console.log('✅ User authenticated:', currentUser?.email);
+        } else {
+            currentUser = null;
+            console.log('ℹ️ No authenticated user');
         }
         console.log('✅ Authentication initialized successfully');
     } catch (error) {
@@ -156,7 +159,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                 });
             });
 
-        return true; // Keep channel open for async response
+        return true; // Keep the message channel open for async response
     } else if (request.action === 'userAuthenticated') {
         currentUser = request.user;
         console.log('User authenticated via popup:', currentUser?.email);
@@ -197,51 +200,115 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
             const selectedText = info.selectionText;
             let eventDetails;
             let result;
+            
+            // Log current auth state for debugging
+            console.log('📊 Auth state check:', {
+                hasCurrentUser: !!currentUser,
+                currentUserEmail: currentUser?.email,
+                isAuthenticated: supabaseAuth?.isAuthenticated(),
+                hasSupabaseAuth: !!supabaseAuth
+            });
+
+            // Show initial status
+            await sendStatusMessage(tab.id, 'Processing your text...', 'This may take a few seconds');
 
             // Check if user is authenticated
             if (currentUser && supabaseAuth?.isAuthenticated()) {
-                console.log('User authenticated, checking processing method...');
+                console.log('✅ User authenticated, checking processing method...');
 
                 // Priority 1: Check if user has their own OpenAI API key
                 const {apiKey} = await chrome.storage.sync.get("apiKey");
                 if (apiKey) {
                     // Use user's API key (they prefer their own key)
                     console.log('Using user\'s OpenAI API key');
+                    await updateStatusMessage(tab.id, 'Analyzing event details...', 'Using your OpenAI API key');
                     eventDetails = await processWithOpenAI(selectedText, apiKey);
                 } else {
                     // Priority 2: Use backend service with our API key
                     console.log('Using backend service');
-                    eventDetails = await processWithBackend(selectedText, supabaseAuth.getAccessToken());
+                    await updateStatusMessage(tab.id, 'Processing with backend...', 'Analyzing event details');
+                    
+                    try {
+                        eventDetails = await processWithBackend(selectedText, supabaseAuth.getAccessToken());
+                    } catch (error) {
+                        // Check if it's an auth error
+                        if (isAuthError(error)) {
+                            console.error('Authentication error detected:', error);
+                            await showAuthError(tab.id, error.message);
+                            return;
+                        }
+                        throw error;
+                    }
                 }
 
                 // Use calendar service for authenticated event creation
+                await updateStatusMessage(tab.id, 'Creating calendar event...', 'Almost done');
                 result = await calendarService.processEventCreation(eventDetails, selectedText);
                 console.log('Calendar service result:', result);
 
             } else {
-                console.log('User not authenticated, using API key fallback...');
+                console.log('ℹ️ User not authenticated, using API key fallback...');
 
                 // Get API key for fallback processing
                 const {apiKey} = await chrome.storage.sync.get("apiKey");
+                
+                console.log('📊 API key check:', {
+                    hasApiKey: !!apiKey,
+                    apiKeyLength: apiKey?.length || 0
+                });
 
                 if (!apiKey) {
-                    chrome.notifications.create({
-                        type: 'basic',
-                        iconUrl: 'icons/icon128.png',
-                        title: 'Calendar Event Creator',
-                        message: 'Please sign in with Google or set your OpenAI API key in extension settings'
-                    });
+                    console.log('❌ No API key found - showing setup guidance');
+                    await hideStatusMessage(tab.id);
+                    
+                    // Show modal with setup instructions instead of notification
+                    try {
+                        await chrome.tabs.sendMessage(tab.id, {
+                            type: "SHOW_SETUP_REQUIRED"
+                        });
+                        console.log('✅ Setup modal message sent');
+                    } catch (error) {
+                        console.log('⚠️ Content script not ready, injecting for setup modal...');
+                        // Try to inject content script and retry
+                        try {
+                            await chrome.scripting.executeScript({
+                                target: {tabId: tab.id},
+                                files: ['content.js']
+                            });
+                            await new Promise(resolve => setTimeout(resolve, 100));
+                            await chrome.tabs.sendMessage(tab.id, {
+                                type: "SHOW_SETUP_REQUIRED"
+                            });
+                            console.log('✅ Setup modal sent after injection');
+                        } catch (retryError) {
+                            // Fallback to notification if modal fails completely
+                            console.log('⚠️ Modal failed completely, using notification fallback');
+                            chrome.notifications.create({
+                                type: 'basic',
+                                iconUrl: 'icons/icon128.png',
+                                title: 'Setup Required',
+                                message: 'Please sign in with Google or set your OpenAI API key in extension settings'
+                            });
+                        }
+                    }
                     return;
                 }
 
                 // Process with OpenAI and create calendar URL
+                console.log('✅ Using API key for processing');
+                await updateStatusMessage(tab.id, 'Analyzing event details...', 'Using your OpenAI API key');
                 eventDetails = await processWithOpenAI(selectedText, apiKey);
+                
+                await updateStatusMessage(tab.id, 'Creating calendar event...', 'Almost done');
                 result = {
                     method: 'url',
                     calendarUrl: createGoogleCalendarUrl(eventDetails),
                     message: 'Click to add event to your Google Calendar'
                 };
             }
+
+            // Hide status modal before showing confirmation
+            await hideStatusMessage(tab.id);
 
             // Try to send message to content script
             try {
@@ -283,12 +350,21 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
             }
         } catch (error) {
             console.error("Error processing text:", error);
-            chrome.notifications.create({
-                type: 'basic',
-                iconUrl: 'icons/icon128.png',
-                title: 'Calendar Event Creator',
-                message: 'Error: ' + error.message
-            });
+            
+            // Hide status modal
+            await hideStatusMessage(tab.id);
+            
+            // Check if it's an auth error
+            if (isAuthError(error)) {
+                await showAuthError(tab.id, error.message);
+            } else {
+                chrome.notifications.create({
+                    type: 'basic',
+                    iconUrl: 'icons/icon128.png',
+                    title: 'Calendar Event Creator',
+                    message: 'Error: ' + error.message
+                });
+            }
         } finally {
             // Clean up the active request
             activeRequests.delete(tab.id);
@@ -296,10 +372,108 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
     }
 });
 
+// Helper functions for status messages
+async function sendStatusMessage(tabId, message, detail = '') {
+    console.log('📤 Sending status message:', message, detail);
+    try {
+        await chrome.tabs.sendMessage(tabId, {
+            type: "SHOW_STATUS",
+            message: message,
+            detail: detail
+        });
+        console.log('✅ Status message sent successfully');
+    } catch (error) {
+        console.log('⚠️ Content script not ready, injecting...', error.message);
+        // Inject content script if not loaded
+        try {
+            await chrome.scripting.executeScript({
+                target: {tabId: tabId},
+                files: ['content.js']
+            });
+            console.log('✅ Content script injected');
+            await new Promise(resolve => setTimeout(resolve, 100));
+            await chrome.tabs.sendMessage(tabId, {
+                type: "SHOW_STATUS",
+                message: message,
+                detail: detail
+            });
+            console.log('✅ Status message sent after injection');
+        } catch (e) {
+            console.error('❌ Failed to show status message:', e);
+        }
+    }
+}
+
+async function updateStatusMessage(tabId, message, detail = '') {
+    try {
+        await chrome.tabs.sendMessage(tabId, {
+            type: "UPDATE_STATUS",
+            message: message,
+            detail: detail
+        });
+    } catch (error) {
+        console.log('Failed to update status message:', error);
+    }
+}
+
+async function hideStatusMessage(tabId) {
+    try {
+        await chrome.tabs.sendMessage(tabId, {
+            type: "HIDE_STATUS"
+        });
+    } catch (error) {
+        console.log('Failed to hide status message:', error);
+    }
+}
+
+async function showAuthError(tabId, errorMessage) {
+    try {
+        await chrome.tabs.sendMessage(tabId, {
+            type: "SHOW_AUTH_ERROR",
+            message: errorMessage
+        });
+    } catch (error) {
+        // Fallback to notification
+        chrome.notifications.create({
+            type: 'basic',
+            iconUrl: 'icons/icon128.png',
+            title: 'Authentication Required',
+            message: 'Please sign in with Google via the extension popup.'
+        });
+    }
+}
+
+// Check if error is an authentication error
+function isAuthError(error) {
+    if (!error) return false;
+    
+    const errorMessage = error.message || '';
+    const authErrorPatterns = [
+        'authentication failed',
+        'not authenticated',
+        'session expired',
+        'invalid token',
+        'unauthorized',
+        'sign in required',
+        '401',
+        'access denied'
+    ];
+    
+    return authErrorPatterns.some(pattern => 
+        errorMessage.toLowerCase().includes(pattern.toLowerCase())
+    );
+}
+
 // Process text with backend service
 async function processWithBackend(text, accessToken) {
     try {
         console.log('Calling backend service...');
+        
+        // Check if we have a valid access token
+        if (!accessToken) {
+            throw new Error('Authentication required. Please sign in with Google.');
+        }
+        
         const response = await fetch(CONFIG.EDGE_FUNCTIONS.PROCESS_TEXT, {
             method: 'POST',
             headers: {
@@ -309,6 +483,11 @@ async function processWithBackend(text, accessToken) {
             body: JSON.stringify({ selectedText: text })
         });
 
+        // Check for auth errors
+        if (response.status === 401) {
+            throw new Error('Session expired. Please sign in again with Google.');
+        }
+
         if (!response.ok) {
             const errorData = await response.json();
 
@@ -316,6 +495,15 @@ async function processWithBackend(text, accessToken) {
             if (errorData.error && errorData.error.includes('Monthly limit exceeded')) {
                 // Don't fall back to basic for limit errors - let user know they need to upgrade or wait
                 throw new Error(errorData.error);
+            }
+            
+            // Check for other auth-related errors
+            if (errorData.error && (
+                errorData.error.includes('authentication') ||
+                errorData.error.includes('unauthorized') ||
+                errorData.error.includes('session')
+            )) {
+                throw new Error('Authentication failed. Please sign in again with Google.');
             }
 
             throw new Error(errorData.error || `Backend processing failed: ${response.status}`);
@@ -336,6 +524,11 @@ async function processWithBackend(text, accessToken) {
 
         // Don't fall back for usage limit errors - propagate them
         if (error.message && error.message.includes('Monthly limit exceeded')) {
+            throw error;
+        }
+        
+        // Don't fall back for auth errors - propagate them
+        if (isAuthError(error)) {
             throw error;
         }
 
