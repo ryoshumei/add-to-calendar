@@ -27,8 +27,15 @@ class SupabaseAuth {
 
         if (createClientFunc && typeof CONFIG !== 'undefined') {
             console.log('✅ Creating Supabase client...');
-            this.supabase = createClientFunc(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_ANON_KEY);
-            console.log('✅ Supabase client created');
+            this.supabase = createClientFunc(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_ANON_KEY, {
+                auth: {
+                    autoRefreshToken: true,   // Automatically refresh tokens before they expire
+                    persistSession: false,     // We handle persistence manually via Chrome storage
+                    detectSessionInUrl: false, // Not needed for Chrome extensions
+                    storage: null              // Use default in-memory storage, we handle persistence
+                }
+            });
+            console.log('✅ Supabase client created with auto-refresh enabled');
             
             // Set up auth state change listener to automatically persist session updates
             this.setupAuthListener();
