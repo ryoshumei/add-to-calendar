@@ -1,0 +1,493 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Privacy Policy for Calendar Event Creator Chrome Extension">
+    <title>Privacy Policy - Calendar Event Creator</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            background-color: #f5f5f5;
+        }
+
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: white;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        header {
+            text-align: center;
+            padding: 40px 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            margin: -20px -20px 40px -20px;
+        }
+
+        h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+            font-weight: 600;
+        }
+
+        .subtitle {
+            font-size: 1.1em;
+            opacity: 0.9;
+        }
+
+        .last-updated {
+            font-style: italic;
+            color: #666;
+            text-align: center;
+            margin-bottom: 40px;
+        }
+
+        h2 {
+            color: #667eea;
+            margin-top: 40px;
+            margin-bottom: 15px;
+            font-size: 1.8em;
+            border-bottom: 2px solid #667eea;
+            padding-bottom: 10px;
+        }
+
+        h3 {
+            color: #764ba2;
+            margin-top: 25px;
+            margin-bottom: 10px;
+            font-size: 1.3em;
+        }
+
+        p, li {
+            margin-bottom: 12px;
+            color: #444;
+        }
+
+        ul {
+            margin-left: 30px;
+            margin-bottom: 20px;
+        }
+
+        .highlight-box {
+            background-color: #f0f4ff;
+            border-left: 4px solid #667eea;
+            padding: 20px;
+            margin: 20px 0;
+            border-radius: 4px;
+        }
+
+        .info-section {
+            background-color: #fef9e7;
+            border-left: 4px solid #f39c12;
+            padding: 15px;
+            margin: 20px 0;
+            border-radius: 4px;
+        }
+
+        .contact-box {
+            background-color: #e8f5e9;
+            border: 2px solid #4caf50;
+            padding: 20px;
+            margin: 30px 0;
+            border-radius: 8px;
+            text-align: center;
+        }
+
+        .contact-box h3 {
+            color: #4caf50;
+            margin-top: 0;
+        }
+
+        .contact-box a {
+            color: #4caf50;
+            text-decoration: none;
+            font-weight: 600;
+        }
+
+        .contact-box a:hover {
+            text-decoration: underline;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 20px 0;
+        }
+
+        th, td {
+            padding: 12px;
+            text-align: left;
+            border-bottom: 1px solid #ddd;
+        }
+
+        th {
+            background-color: #667eea;
+            color: white;
+            font-weight: 600;
+        }
+
+        tr:hover {
+            background-color: #f5f5f5;
+        }
+
+        .checkmark {
+            color: #4caf50;
+            font-weight: bold;
+        }
+
+        .crossmark {
+            color: #f44336;
+            font-weight: bold;
+        }
+
+        footer {
+            text-align: center;
+            padding: 30px 20px;
+            margin-top: 40px;
+            background-color: #f5f5f5;
+            color: #666;
+            border-top: 1px solid #ddd;
+        }
+
+        @media (max-width: 768px) {
+            .container {
+                padding: 10px;
+            }
+
+            h1 {
+                font-size: 2em;
+            }
+
+            h2 {
+                font-size: 1.5em;
+            }
+
+            header {
+                padding: 30px 15px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Privacy Policy</h1>
+            <p class="subtitle">Calendar Event Creator Chrome Extension</p>
+        </header>
+
+        <p class="last-updated"><strong>Last Updated:</strong> October 2024</p>
+
+        <section>
+            <h2>1. Introduction</h2>
+            <p>Welcome to Calendar Event Creator. We are committed to protecting your privacy and being transparent about the data we collect and how we use it.</p>
+
+            <p>This Privacy Policy explains what information we collect, how we use it, and your rights regarding your data when you use our Chrome extension.</p>
+
+            <div class="highlight-box">
+                <strong>Our Commitment:</strong> We collect only the minimum data necessary to provide our service. We do not sell your data, track your browsing history, or use your information for advertising purposes.
+            </div>
+        </section>
+
+        <section>
+            <h2>2. Information We Collect</h2>
+
+            <h3>2.1 Authentication Information</h3>
+            <p>When you choose to sign in with Google, we collect:</p>
+            <ul>
+                <li><strong>Google OAuth Tokens:</strong> Access tokens, refresh tokens, and ID tokens provided by Google during authentication</li>
+                <li><strong>Supabase Session Tokens:</strong> JWT tokens for maintaining your authenticated session</li>
+                <li><strong>Basic Profile Information:</strong> Your email address, name, and profile picture from your Google account</li>
+            </ul>
+
+            <div class="info-section">
+                <strong>Note:</strong> Authentication is <strong>optional</strong>. You can use the extension with your own OpenAI API key without signing in.
+            </div>
+
+            <h3>2.2 Website Content</h3>
+            <p>We collect the text you select and submit for calendar event creation:</p>
+            <ul>
+                <li><strong>Selected Text:</strong> Only the specific text you highlight and choose to process</li>
+                <li><strong>Collection Method:</strong> Triggered only when you right-click and select "Add to Google Calendar"</li>
+                <li><strong>Scope:</strong> Limited to the text you explicitly select; we do not monitor or access any other page content</li>
+            </ul>
+
+            <h3>2.3 Usage Information (Authenticated Users Only)</h3>
+            <p>For users signed in with Google, we track:</p>
+            <ul>
+                <li><strong>Monthly Request Count:</strong> Number of backend API calls made per calendar month</li>
+                <li><strong>Purpose:</strong> Enforce the 50 requests/month free tier limit</li>
+                <li><strong>Format:</strong> Simple counter stored as year-month (e.g., "2024-10") and usage count</li>
+            </ul>
+        </section>
+
+        <section>
+            <h2>3. Data We Do NOT Collect</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Data Type</th>
+                        <th>Collected?</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>Browsing history or web pages visited</td>
+                        <td><span class="crossmark">✗</span> Never</td>
+                    </tr>
+                    <tr>
+                        <td>Mouse movements, clicks, or keystrokes</td>
+                        <td><span class="crossmark">✗</span> Never</td>
+                    </tr>
+                    <tr>
+                        <td>Financial or payment information</td>
+                        <td><span class="crossmark">✗</span> Never</td>
+                    </tr>
+                    <tr>
+                        <td>Health information</td>
+                        <td><span class="crossmark">✗</span> Never</td>
+                    </tr>
+                    <tr>
+                        <td>Location data (GPS, IP address)</td>
+                        <td><span class="crossmark">✗</span> Never</td>
+                    </tr>
+                    <tr>
+                        <td>Personal communications (emails, texts)</td>
+                        <td><span class="crossmark">✗</span> Never</td>
+                    </tr>
+                </tbody>
+            </table>
+        </section>
+
+        <section>
+            <h2>4. How We Use Your Information</h2>
+
+            <h3>4.1 Authentication Information</h3>
+            <ul>
+                <li>Authenticate your identity with Google OAuth</li>
+                <li>Maintain your login session across browser restarts</li>
+                <li>Authorize backend API requests</li>
+                <li>Display your profile information in the extension popup</li>
+            </ul>
+
+            <h3>4.2 Selected Text</h3>
+            <ul>
+                <li>Process with OpenAI's API to extract event details (title, date, time, location, description)</li>
+                <li>Create pre-filled Google Calendar event URLs</li>
+                <li><strong>Not stored permanently</strong> - text is processed and immediately discarded</li>
+            </ul>
+
+            <h3>4.3 Usage Information</h3>
+            <ul>
+                <li>Track monthly API usage against the 50 requests/month limit</li>
+                <li>Display usage statistics in the extension popup</li>
+                <li>Prevent abuse of the free tier service</li>
+            </ul>
+        </section>
+
+        <section>
+            <h2>5. How We Store and Protect Your Information</h2>
+
+            <h3>5.1 Local Storage (Chrome Extension)</h3>
+            <ul>
+                <li><strong>OpenAI API Keys:</strong> Stored in <code>chrome.storage.sync</code> (encrypted by Chrome, synced across your devices)</li>
+                <li><strong>Session Tokens:</strong> Stored in <code>chrome.storage.local</code> (encrypted by Chrome, device-specific)</li>
+                <li><strong>Usage Cache:</strong> Current month's usage count stored locally for quick display</li>
+            </ul>
+
+            <h3>5.2 Backend Storage (Supabase)</h3>
+            <ul>
+                <li><strong>Session Data:</strong> Stored with encryption in Supabase database</li>
+                <li><strong>Usage Tracking:</strong> User ID + year-month + count stored in PostgreSQL with Row Level Security (RLS)</li>
+                <li><strong>Access Control:</strong> Each user can only access their own data (enforced by database policies)</li>
+            </ul>
+
+            <h3>5.3 Security Measures</h3>
+            <ul>
+                <li><strong>HTTPS Only:</strong> All network communications use TLS/SSL encryption</li>
+                <li><strong>No Plaintext Storage:</strong> Tokens encrypted by Chrome's secure storage APIs</li>
+                <li><strong>Row Level Security:</strong> Database-level access control prevents unauthorized data access</li>
+                <li><strong>Token Expiration:</strong> Access tokens expire after 1 hour, refresh tokens after 7 days</li>
+            </ul>
+        </section>
+
+        <section>
+            <h2>6. Data Retention</h2>
+
+            <table>
+                <thead>
+                    <tr>
+                        <th>Data Type</th>
+                        <th>Retention Period</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>Selected Text</td>
+                        <td><span class="checkmark">✓</span> Not retained (processed and discarded immediately)</td>
+                    </tr>
+                    <tr>
+                        <td>Access Tokens</td>
+                        <td>1 hour (then auto-refreshed or expired)</td>
+                    </tr>
+                    <tr>
+                        <td>Refresh Tokens</td>
+                        <td>7 days (then must re-authenticate)</td>
+                    </tr>
+                    <tr>
+                        <td>Usage Statistics</td>
+                        <td>Current month + historical months (for tracking)</td>
+                    </tr>
+                    <tr>
+                        <td>User Account (Supabase)</td>
+                        <td>Until you sign out or delete extension</td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <p><strong>Automatic Cleanup:</strong> When you sign out or uninstall the extension, all locally stored data is automatically deleted from your device.</p>
+        </section>
+
+        <section>
+            <h2>7. Third-Party Services</h2>
+
+            <p>Our extension integrates with the following third-party services:</p>
+
+            <h3>7.1 Google OAuth (Authentication)</h3>
+            <ul>
+                <li><strong>Purpose:</strong> User authentication via Google account</li>
+                <li><strong>Data Shared:</strong> Google provides us with your email, name, and profile picture</li>
+                <li><strong>Privacy Policy:</strong> <a href="https://policies.google.com/privacy" target="_blank">https://policies.google.com/privacy</a></li>
+            </ul>
+
+            <h3>7.2 OpenAI API (Text Processing)</h3>
+            <ul>
+                <li><strong>Purpose:</strong> Natural language processing to extract event details</li>
+                <li><strong>Data Shared:</strong> Only the selected text you choose to process</li>
+                <li><strong>API Usage:</strong>
+                    <ul>
+                        <li>Your API key: Text sent directly from extension to OpenAI (never touches our servers)</li>
+                        <li>Backend service: Text processed through our Supabase Edge Function with our API key</li>
+                    </ul>
+                </li>
+                <li><strong>Privacy Policy:</strong> <a href="https://openai.com/policies/privacy-policy" target="_blank">https://openai.com/policies/privacy-policy</a></li>
+            </ul>
+
+            <h3>7.3 Supabase (Backend Infrastructure)</h3>
+            <ul>
+                <li><strong>Purpose:</strong> Authentication, session management, usage tracking, backend processing</li>
+                <li><strong>Data Stored:</strong> User sessions, usage statistics</li>
+                <li><strong>Security:</strong> Industry-standard encryption and Row Level Security</li>
+                <li><strong>Privacy Policy:</strong> <a href="https://supabase.com/privacy" target="_blank">https://supabase.com/privacy</a></li>
+            </ul>
+
+            <h3>7.4 Google Calendar (URL-based Integration)</h3>
+            <ul>
+                <li><strong>Purpose:</strong> Create calendar events from extracted information</li>
+                <li><strong>Integration Method:</strong> URL parameters (no direct API access, no data sent to us)</li>
+                <li><strong>Privacy Policy:</strong> <a href="https://policies.google.com/privacy" target="_blank">https://policies.google.com/privacy</a></li>
+            </ul>
+        </section>
+
+        <section>
+            <h2>8. Your Rights and Choices</h2>
+
+            <h3>8.1 Access Your Data</h3>
+            <p>You can view your stored data at any time:</p>
+            <ul>
+                <li><strong>API Key:</strong> Visible in extension popup settings</li>
+                <li><strong>Usage Statistics:</strong> Displayed in extension popup when signed in</li>
+                <li><strong>Session Information:</strong> Available via Chrome DevTools (chrome://extensions/)</li>
+            </ul>
+
+            <h3>8.2 Delete Your Data</h3>
+            <ul>
+                <li><strong>API Key:</strong> Click "Delete" button in extension settings</li>
+                <li><strong>Sessions:</strong> Click "Sign Out" button in extension popup</li>
+                <li><strong>Complete Removal:</strong> Uninstall the extension to remove all local data</li>
+                <li><strong>Backend Data:</strong> Contact us to request deletion of server-side usage records</li>
+            </ul>
+
+            <h3>8.3 Opt-Out Options</h3>
+            <ul>
+                <li><strong>Backend Service:</strong> Use your own OpenAI API key instead of signing in with Google</li>
+                <li><strong>Usage Tracking:</strong> Not applicable when using your own API key</li>
+                <li><strong>Analytics:</strong> We don't use analytics tools, so there's nothing to opt out of</li>
+            </ul>
+        </section>
+
+        <section>
+            <h2>9. Data Sharing and Sale</h2>
+
+            <div class="highlight-box">
+                <strong>We do NOT:</strong>
+                <ul style="margin-bottom: 0;">
+                    <li><span class="crossmark">✗</span> Sell your data to third parties</li>
+                    <li><span class="crossmark">✗</span> Share your data for advertising purposes</li>
+                    <li><span class="crossmark">✗</span> Use your data for purposes unrelated to calendar event creation</li>
+                    <li><span class="crossmark">✗</span> Transfer your data for creditworthiness or lending purposes</li>
+                </ul>
+            </div>
+
+            <p><strong>Limited Data Sharing:</strong> We only share data with third-party services explicitly mentioned in Section 7, and only to the extent necessary to provide our service.</p>
+        </section>
+
+        <section>
+            <h2>10. Children's Privacy</h2>
+            <p>Our extension is not directed at children under the age of 13. We do not knowingly collect personal information from children. If you believe we have inadvertently collected data from a child, please contact us immediately.</p>
+        </section>
+
+        <section>
+            <h2>11. International Users</h2>
+            <p>Our extension is available globally. Data may be processed in the United States or other countries where our service providers operate. By using our extension, you consent to the transfer of your data to these locations.</p>
+        </section>
+
+        <section>
+            <h2>12. Changes to This Privacy Policy</h2>
+            <p>We may update this Privacy Policy from time to time. When we make significant changes, we will:</p>
+            <ul>
+                <li>Update the "Last Updated" date at the top of this page</li>
+                <li>Notify users through the extension (if applicable)</li>
+                <li>Publish the updated policy on this page</li>
+            </ul>
+            <p>We encourage you to review this Privacy Policy periodically to stay informed about how we protect your information.</p>
+        </section>
+
+        <section>
+            <h2>13. Contact Us</h2>
+            <div class="contact-box">
+                <h3>Questions or Concerns?</h3>
+                <p>If you have any questions about this Privacy Policy or our data practices, please contact us:</p>
+                <p><strong>Email:</strong> <a href="mailto:your-email@example.com">your-email@example.com</a></p>
+                <p><strong>GitHub Issues:</strong> <a href="https://github.com/your-username/add-to-calendar/issues" target="_blank">Report an Issue</a></p>
+            </div>
+        </section>
+
+        <section>
+            <h2>14. Legal Basis for Processing (GDPR)</h2>
+            <p>For users in the European Economic Area (EEA), we process your personal data based on:</p>
+            <ul>
+                <li><strong>Consent:</strong> You provide explicit consent when signing in with Google</li>
+                <li><strong>Legitimate Interest:</strong> Processing selected text to provide the calendar event creation service you requested</li>
+                <li><strong>Contract Performance:</strong> Providing the service you agreed to use</li>
+            </ul>
+            <p>You have the right to withdraw consent at any time by signing out or uninstalling the extension.</p>
+        </section>
+
+        <footer>
+            <p>&copy; 2024 Calendar Event Creator. All rights reserved.</p>
+            <p>This extension is not affiliated with Google, OpenAI, or Supabase.</p>
+        </footer>
+    </div>
+</body>
+</html>
