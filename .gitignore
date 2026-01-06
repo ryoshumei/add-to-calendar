@@ -79,3 +79,8 @@ local-docs/
 # MCP Servers
 .playwright-mcp/
 .serena/
+/prompt/
+/BUG-FIX-SESSION-EXPIRATION.md
+/FAQ.md
+/GITHUB_PAGES_SETUP.md
+/screenshots/
