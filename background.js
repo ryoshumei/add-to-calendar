@@ -300,9 +300,12 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
                 eventDetails = await processWithOpenAI(selectedText, apiKey);
                 
                 await updateStatusMessage(tab.id, 'Creating calendar event...', 'Almost done');
+                // Create URL for first event (fallback for direct opening)
                 result = {
                     method: 'url',
-                    calendarUrl: createGoogleCalendarUrl(eventDetails),
+                    calendarUrl: eventDetails.events?.length > 0
+                        ? createGoogleCalendarUrl(eventDetails.events[0])
+                        : null,
                     message: 'Click to add event to your Google Calendar'
                 };
             }
@@ -311,12 +314,13 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
             await hideStatusMessage(tab.id);
 
             // Try to send message to content script
+            // eventDetails now contains { events: [...] } array structure
             try {
                 const response = await chrome.tabs.sendMessage(tab.id, {
                     type: "SHOW_CONFIRMATION",
                     requestId,
-                    eventDetails,
-                    calendarUrl: result.calendarUrl,
+                    events: eventDetails.events, // Send events array
+                    calendarUrl: result.calendarUrl, // Kept for backward compatibility
                     result: result
                 });
 
@@ -337,14 +341,16 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
                     await chrome.tabs.sendMessage(tab.id, {
                         type: "SHOW_CONFIRMATION",
                         requestId,
-                        eventDetails,
-                         calendarUrl: result.calendarUrl,
+                        events: eventDetails.events, // Send events array
+                        calendarUrl: result.calendarUrl,
                         result: result
                     });
                 } catch (retryError) {
-                    // If it still fails, open calendar directly
+                    // If it still fails, open calendar directly for first event
                     if (result.calendarUrl) {
                         chrome.tabs.create({url: result.calendarUrl});
+                    } else if (eventDetails.events && eventDetails.events.length > 0) {
+                        chrome.tabs.create({url: createGoogleCalendarUrl(eventDetails.events[0])});
                     }
                 }
             }
@@ -543,17 +549,23 @@ async function processWithOpenAI(text, apiKey) {
     const now = new Date();
     const currentDateTime = now.toLocaleString();
 
-    const systemPrompt = `You are a JSON API that extracts event details from text. Return ONLY a raw JSON object with these properties:
+    const systemPrompt = `You are a JSON API that extracts event details from text. Return ONLY a raw JSON object with an "events" array containing one or more event objects:
     {
-        "title": "event title",
-        "description": "brief description",
-        "startTime": "YYYY-MM-DDTHH:mm:ss",
-        "endTime": "YYYY-MM-DDTHH:mm:ss",
-        "location": "location if mentioned, include online link if available"
+        "events": [
+            {
+                "title": "event title",
+                "description": "brief description",
+                "startTime": "YYYY-MM-DDTHH:mm:ss",
+                "endTime": "YYYY-MM-DDTHH:mm:ss",
+                "location": "location if mentioned, include online link if available"
+            }
+        ]
     }
     Current time is: ${currentDateTime}
     For relative dates, use the current time as reference.
     If no specific time mentioned, assume 10:00 AM for 1 hour.
+    If the text contains multiple events, extract ALL of them as separate objects in the array.
+    If only one event is found, still return it inside the events array.
     DO NOT include any markdown formatting, code blocks, or extra text.
     ONLY return the JSON object itself.`;
 
@@ -576,7 +588,9 @@ async function processWithOpenAI(text, apiKey) {
                         content: `Time: ${currentDateTime}\nText: ${text}`
                     }
                 ],
-                temperature: 0.3 // Lower temperature for more consistent JSON output
+                temperature: 0.3,
+                top_p: 1,
+                response_format: { type: 'json_object' }
             })
         });
 
@@ -590,9 +604,15 @@ async function processWithOpenAI(text, apiKey) {
         console.log('Raw GPT response:', data.choices[0].message.content);
 
         try {
-            const eventDetails = JSON.parse(data.choices[0].message.content.trim());
-            validateEventDetails(eventDetails);
-            return eventDetails;
+            let response = JSON.parse(data.choices[0].message.content.trim());
+
+            // Backward compatibility: wrap single event in events array
+            if (!response.events && response.title) {
+                response = { events: [response] };
+            }
+
+            validateEventResponse(response);
+            return response;
         } catch (parseError) {
             console.error('JSON Parse Error:', parseError);
             console.error('Raw content:', data.choices[0].message.content);
@@ -603,8 +623,8 @@ async function processWithOpenAI(text, apiKey) {
         throw new Error('Failed to process text: ' + error.message);
     }
 }
-// Create Google Calendar URL
-function createGoogleCalendarUrl(eventDetails) {
+// Create Google Calendar URL with optional timezone support
+function createGoogleCalendarUrl(eventDetails, timezone = null) {
     const baseUrl = 'https://calendar.google.com/calendar/render';
 
     try {
@@ -632,6 +652,11 @@ function createGoogleCalendarUrl(eventDetails) {
         const endTime = formatDateTime(eventDetails.endTime);
         params.append('dates', `${startTime}/${endTime}`);
 
+        // Add timezone parameter if provided
+        if (timezone) {
+            params.append('ctz', timezone);
+        }
+
         return `${baseUrl}?${params.toString()}`;
     } catch (error) {
         console.error('Error creating calendar URL:', error);
@@ -652,33 +677,48 @@ function createBasicEventFromText(text) {
     const endTime = new Date(startTime);
     endTime.setHours(11, 0, 0, 0);
 
+    // Return in new events array format
     return {
-        title: text.substring(0, 100) + (text.length > 100 ? '...' : ''), // Truncate long text
-        description: `Event created from selected text: "${text}"`,
-        startTime: startTime.toISOString().slice(0, 19), // Format: YYYY-MM-DDTHH:mm:ss
-        endTime: endTime.toISOString().slice(0, 19),
-        location: ''
+        events: [{
+            title: text.substring(0, 100) + (text.length > 100 ? '...' : ''), // Truncate long text
+            description: `Event created from selected text: "${text}"`,
+            startTime: startTime.toISOString().slice(0, 19), // Format: YYYY-MM-DDTHH:mm:ss
+            endTime: endTime.toISOString().slice(0, 19),
+            location: ''
+        }]
     };
 }
 
-// Validate event details
-function validateEventDetails(details) {
+// Validate event response structure (wrapper with events array)
+function validateEventResponse(response) {
+    if (!response || !Array.isArray(response.events) || response.events.length === 0) {
+        throw new Error('Invalid response: Expected object with events array containing at least one event');
+    }
+
+    // Validate each event in the array
+    response.events.forEach((event, index) => {
+        validateSingleEventDetails(event, index);
+    });
+}
+
+// Validate single event details
+function validateSingleEventDetails(details, index = 0) {
     const required = ['title', 'startTime', 'endTime'];
     const missing = required.filter(field => !details[field]);
 
     if (missing.length > 0) {
-        throw new Error(`Invalid response: Missing required fields: ${missing.join(', ')}`);
+        throw new Error(`Event ${index + 1}: Missing required fields: ${missing.join(', ')}`);
     }
 
     // Validate datetime format
     const dateTimeRegex = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/;
     if (!dateTimeRegex.test(details.startTime) || !dateTimeRegex.test(details.endTime)) {
-        throw new Error('Invalid datetime format in response');
+        throw new Error(`Event ${index + 1}: Invalid datetime format`);
     }
 
     // Ensure start time is before end time
     if (new Date(details.startTime) >= new Date(details.endTime)) {
-        throw new Error('Start time must be before end time');
+        throw new Error(`Event ${index + 1}: Start time must be before end time`);
     }
 }
 

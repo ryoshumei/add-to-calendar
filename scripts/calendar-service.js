@@ -7,8 +7,8 @@ class CalendarService {
         // No Edge Function URL needed for URL-based approach
     }
 
-    // Fallback: Create Google Calendar URL (existing functionality)
-    createGoogleCalendarUrl(eventDetails) {
+    // Create Google Calendar URL with optional timezone support
+    createGoogleCalendarUrl(eventDetails, timezone = null) {
         const baseUrl = 'https://calendar.google.com/calendar/render';
 
         const params = new URLSearchParams({
@@ -18,6 +18,11 @@ class CalendarService {
             details: eventDetails.description || '',
             location: eventDetails.location || ''
         });
+
+        // Add timezone parameter if provided
+        if (timezone) {
+            params.append('ctz', timezone);
+        }
 
         return `${baseUrl}?${params.toString()}`;
     }
@@ -36,12 +41,20 @@ class CalendarService {
         return `${start}/${end}`;
     }
 
-    // URL-based event processing (simplified)
+    // URL-based event processing (supports multiple events)
     async processEventCreation(eventDetails, selectedText) {
         // Always use URL-based creation regardless of authentication status
         console.log('Creating calendar URL...');
 
-        const calendarUrl = this.createGoogleCalendarUrl(eventDetails);
+        // Handle both single event (backward compat) and events array
+        let calendarUrl;
+        if (eventDetails.events && eventDetails.events.length > 0) {
+            // New format: use first event for calendarUrl (fallback)
+            calendarUrl = this.createGoogleCalendarUrl(eventDetails.events[0]);
+        } else {
+            // Old format: single event object
+            calendarUrl = this.createGoogleCalendarUrl(eventDetails);
+        }
 
         return {
             success: true,

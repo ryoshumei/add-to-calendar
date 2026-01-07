@@ -17,6 +17,10 @@ interface EventDetails {
   location?: string;
 }
 
+interface EventResponse {
+  events: EventDetails[];
+}
+
 interface UsageInfo {
   usageCount: number;
   limit: number;
@@ -104,23 +108,29 @@ serve(async (req) => {
 
 /**
  * Process text with OpenAI API to extract event details
- * Logic matches the client-side implementation in background.js
+ * Supports extracting multiple events from a single text selection
  */
-async function processWithOpenAI(text: string, apiKey: string): Promise<EventDetails> {
+async function processWithOpenAI(text: string, apiKey: string): Promise<EventResponse> {
   const now = new Date()
   const currentDateTime = now.toLocaleString()
 
-  const systemPrompt = `You are a JSON API that extracts event details from text. Return ONLY a raw JSON object with these properties:
+  const systemPrompt = `You are a JSON API that extracts event details from text. Return ONLY a raw JSON object with an "events" array containing one or more event objects:
     {
-        "title": "event title",
-        "description": "brief description",
-        "startTime": "YYYY-MM-DDTHH:mm:ss",
-        "endTime": "YYYY-MM-DDTHH:mm:ss",
-        "location": "location if mentioned, include online link if available"
+        "events": [
+            {
+                "title": "event title",
+                "description": "brief description",
+                "startTime": "YYYY-MM-DDTHH:mm:ss",
+                "endTime": "YYYY-MM-DDTHH:mm:ss",
+                "location": "location if mentioned, include online link if available"
+            }
+        ]
     }
     Current time is: ${currentDateTime}
     For relative dates, use the current time as reference.
     If no specific time mentioned, assume 10:00 AM for 1 hour.
+    If the text contains multiple events, extract ALL of them as separate objects in the array.
+    If only one event is found, still return it inside the events array.
     DO NOT include any markdown formatting, code blocks, or extra text.
     ONLY return the JSON object itself.`
 
@@ -143,7 +153,9 @@ async function processWithOpenAI(text: string, apiKey: string): Promise<EventDet
             content: `Time: ${currentDateTime}\nText: ${text}`
           }
         ],
-        temperature: 0.3 // Lower temperature for consistent JSON output
+        temperature: 0.3,
+        top_p: 1,
+        response_format: { type: 'json_object' }
       })
     })
 
@@ -156,9 +168,15 @@ async function processWithOpenAI(text: string, apiKey: string): Promise<EventDet
     console.log('Raw GPT response:', data.choices[0].message.content)
 
     try {
-      const eventDetails = JSON.parse(data.choices[0].message.content.trim())
-      validateEventDetails(eventDetails)
-      return eventDetails
+      let response = JSON.parse(data.choices[0].message.content.trim())
+
+      // Backward compatibility: wrap single event in events array
+      if (!response.events && response.title) {
+        response = { events: [response] }
+      }
+
+      validateEventResponse(response)
+      return response
     } catch (parseError) {
       console.error('JSON Parse Error:', parseError)
       console.error('Raw content:', data.choices[0].message.content)
@@ -171,26 +189,39 @@ async function processWithOpenAI(text: string, apiKey: string): Promise<EventDet
 }
 
 /**
- * Validate event details structure and content
- * Matches validation logic in background.js
+ * Validate event response structure (wrapper with events array)
  */
-function validateEventDetails(details: EventDetails) {
+function validateEventResponse(response: EventResponse) {
+  if (!response || !Array.isArray(response.events) || response.events.length === 0) {
+    throw new Error('Invalid response: Expected object with events array containing at least one event')
+  }
+
+  // Validate each event in the array
+  response.events.forEach((event, index) => {
+    validateSingleEventDetails(event, index)
+  })
+}
+
+/**
+ * Validate single event details structure and content
+ */
+function validateSingleEventDetails(details: EventDetails, index: number = 0) {
   const required = ['title', 'startTime', 'endTime']
   const missing = required.filter(field => !details[field as keyof EventDetails])
 
   if (missing.length > 0) {
-    throw new Error(`Invalid response: Missing required fields: ${missing.join(', ')}`)
+    throw new Error(`Event ${index + 1}: Missing required fields: ${missing.join(', ')}`)
   }
 
   // Validate datetime format
   const dateTimeRegex = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/
   if (!dateTimeRegex.test(details.startTime) || !dateTimeRegex.test(details.endTime)) {
-    throw new Error('Invalid datetime format in response')
+    throw new Error(`Event ${index + 1}: Invalid datetime format`)
   }
 
   // Ensure start time is before end time
   if (new Date(details.startTime) >= new Date(details.endTime)) {
-    throw new Error('Start time must be before end time')
+    throw new Error(`Event ${index + 1}: Start time must be before end time`)
   }
 }
 

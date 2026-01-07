@@ -158,8 +158,208 @@ style.textContent = `
     background-color: #e0e0e0;
     color: #202124;
 }
+
+/* Multi-event modal styles */
+.events-list {
+    max-height: 400px;
+    overflow-y: auto;
+}
+
+.event-card {
+    margin: 12px 0;
+    padding: 15px;
+    background-color: #f8f9fa;
+    border-radius: 8px;
+    border-left: 4px solid #4285f4;
+}
+
+.event-card:hover {
+    background-color: #e8f0fe;
+}
+
+.event-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 12px;
+}
+
+.event-info {
+    flex: 1;
+}
+
+.event-title {
+    font-weight: 600;
+    color: #202124;
+    font-size: 15px;
+    margin: 0 0 8px 0;
+}
+
+.event-time {
+    color: #5f6368;
+    font-size: 13px;
+    margin: 4px 0;
+}
+
+.event-location {
+    color: #5f6368;
+    font-size: 13px;
+    margin: 4px 0;
+}
+
+.event-description {
+    color: #5f6368;
+    font-size: 13px;
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px solid #e0e0e0;
+}
+
+.event-add-button {
+    padding: 8px 14px;
+    background-color: #4285f4;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 13px;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
+.event-add-button:hover {
+    background-color: #3367d6;
+}
+
+.event-add-button.added {
+    background-color: #0f9d58;
+    cursor: default;
+}
+
+.event-add-button:disabled {
+    opacity: 0.7;
+    cursor: default;
+}
+
+.events-header {
+    display: flex;
+    align-items: center;
+    margin-bottom: 15px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid #e0e0e0;
+    cursor: move;
+    user-select: none;
+    border-radius: 8px 8px 0 0;
+    margin: -20px -20px 15px -20px;
+    padding: 12px 20px;
+    background: linear-gradient(to bottom, #f8f9fa, #fff);
+    transition: background 0.2s ease;
+}
+
+.events-header:hover {
+    background: linear-gradient(to bottom, #e8f0fe, #f8f9fa);
+}
+
+.events-header:active {
+    background: #e8f0fe;
+}
+
+.drag-handle {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    margin-right: 10px;
+    opacity: 0.4;
+    transition: opacity 0.2s ease;
+}
+
+.events-header:hover .drag-handle {
+    opacity: 0.7;
+}
+
+.drag-handle span {
+    display: block;
+    width: 16px;
+    height: 2px;
+    background-color: #5f6368;
+    border-radius: 1px;
+}
+
+.header-title {
+    flex: 1;
+}
+
+.events-header h2 {
+    margin: 0;
+    cursor: move;
+}
+
+.events-count {
+    color: #5f6368;
+    font-size: 14px;
+    background-color: #e8f0fe;
+    padding: 4px 10px;
+    border-radius: 12px;
+    margin-left: auto;
+}
+
+/* Draggable modal styles */
+.calendar-modal.draggable {
+    position: fixed;
+    cursor: default;
+}
+
+.calendar-modal.dragging {
+    opacity: 0.9;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
+}
 `;
 document.head.appendChild(style);
+
+// Get browser timezone (silent auto-detection)
+function getBrowserTimezone() {
+    try {
+        return Intl.DateTimeFormat().resolvedOptions().timeZone;
+    } catch (e) {
+        console.warn('Could not detect timezone:', e);
+        return null;
+    }
+}
+
+// Browser timezone - detected once on load
+const browserTimezone = getBrowserTimezone();
+
+// Create Google Calendar URL with timezone support
+function createGoogleCalendarUrlForContent(eventDetails) {
+    const baseUrl = 'https://calendar.google.com/calendar/render';
+    const formatDateTime = (isoString) => isoString.replace(/[-:]/g, '');
+
+    const params = new URLSearchParams();
+    params.append('action', 'TEMPLATE');
+
+    if (eventDetails.title) {
+        params.append('text', eventDetails.title);
+    }
+
+    if (eventDetails.description) {
+        params.append('details', eventDetails.description.substring(0, 1000));
+    }
+
+    if (eventDetails.location) {
+        params.append('location', eventDetails.location);
+    }
+
+    const startTime = formatDateTime(eventDetails.startTime);
+    const endTime = formatDateTime(eventDetails.endTime);
+    params.append('dates', `${startTime}/${endTime}`);
+
+    // Add timezone parameter (silent auto-detection)
+    if (browserTimezone) {
+        params.append('ctz', browserTimezone);
+    }
+
+    return `${baseUrl}?${params.toString()}`;
+}
 
 // Track processed requests to prevent duplicates
 const processedRequests = new Set();
@@ -186,7 +386,21 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             processedRequests.delete(message.requestId);
         }, 5000);
 
-        showConfirmationModal(message.eventDetails, message.calendarUrl);
+        // Handle both old format (eventDetails) and new format (events array)
+        let events;
+        if (message.events && Array.isArray(message.events)) {
+            events = message.events;
+        } else if (message.eventDetails?.events) {
+            events = message.eventDetails.events;
+        } else if (message.eventDetails) {
+            // Backward compatibility: single event object
+            events = [message.eventDetails];
+        } else {
+            console.error('No events found in message');
+            return;
+        }
+
+        showConfirmationModal(events, message.calendarUrl);
     } else if (message.type === "ERROR") {
         showError(message.message);
     } else if (message.type === "SHOW_STATUS") {
@@ -469,12 +683,17 @@ function showSetupRequiredModal() {
     }, 30000);
 }
 
-// Display the confirmation modal for event creation
-function showConfirmationModal(eventDetails, calendarUrl) {
+// Display the confirmation modal for event creation (supports multiple events)
+function showConfirmationModal(events, fallbackCalendarUrl) {
     // Remove any existing modals first
     const existingModal = document.querySelector('.calendar-modal-overlay');
     if (existingModal) {
         existingModal.remove();
+    }
+
+    // Ensure events is an array
+    if (!Array.isArray(events)) {
+        events = [events];
     }
 
     const modal = document.createElement('div');
@@ -486,46 +705,116 @@ function showConfirmationModal(eventDetails, calendarUrl) {
         return date.toLocaleString();
     };
 
+    // Generate event cards HTML
+    const eventsHtml = events.map((event, index) => {
+        const calendarUrl = createGoogleCalendarUrlForContent(event);
+        return `
+            <div class="event-card" data-index="${index}">
+                <div class="event-header">
+                    <div class="event-info">
+                        <h4 class="event-title">${event.title}</h4>
+                        <div class="event-time">
+                            📅 ${formatDate(event.startTime)} - ${formatDate(event.endTime)}
+                        </div>
+                        ${event.location ? `<div class="event-location">📍 ${event.location}</div>` : ''}
+                    </div>
+                    <button class="event-add-button" data-url="${calendarUrl}">
+                        Add to Calendar
+                    </button>
+                </div>
+                ${event.description ? `<div class="event-description">${event.description}</div>` : ''}
+            </div>
+        `;
+    }).join('');
+
     modal.innerHTML = `
-        <div class="calendar-modal">
-            <h2>Add to Google Calendar?</h2>
-            <div class="event-details">
-                <p><strong>Title:</strong> ${eventDetails.title}</p>
-                <p><strong>Start:</strong> ${formatDate(eventDetails.startTime)}</p>
-                <p><strong>End:</strong> ${formatDate(eventDetails.endTime)}</p>
-                ${eventDetails.location ? `<p><strong>Location:</strong> ${eventDetails.location}</p>` : ''}
-                ${eventDetails.description ? `<p><strong>Description:</strong> ${eventDetails.description}</p>` : ''}
+        <div class="calendar-modal draggable" style="width: 500px;">
+            <div class="events-header">
+                <div class="drag-handle" title="Drag to move">
+                    <span></span>
+                    <span></span>
+                    <span></span>
+                </div>
+                <div class="header-title">
+                    <h2>Add to Google Calendar</h2>
+                </div>
+                <span class="events-count">${events.length} event${events.length > 1 ? 's' : ''}</span>
+            </div>
+            <div class="events-list">
+                ${eventsHtml}
             </div>
             <div class="calendar-modal-buttons">
-                <button class="cancel">Cancel</button>
-                <button class="confirm">Add to Calendar</button>
+                <button class="cancel">Close</button>
             </div>
         </div>
     `;
 
-    // Function to remove modal and clean up
-    const cleanup = () => {
-        modal.remove();
-    };
-
-    // Single instance of calendar opening
-    let calendarOpened = false;
-    const openCalendar = () => {
-        if (!calendarOpened) {
-            calendarOpened = true;
-            window.open(calendarUrl, '_blank');
-        }
-        cleanup();
-    };
-
     document.body.appendChild(modal);
 
-    // Add event listeners
-    modal.querySelector('button.cancel').addEventListener('click', cleanup);
-    modal.querySelector('button.confirm').addEventListener('click', openCalendar);
+    // Make modal draggable
+    const modalContent = modal.querySelector('.calendar-modal');
+    const dragHandle = modal.querySelector('.events-header');
+    let isDragging = false;
+    let offsetX = 0;
+    let offsetY = 0;
+
+    dragHandle.addEventListener('mousedown', (e) => {
+        // Don't drag if clicking on buttons or interactive elements
+        if (e.target.tagName === 'BUTTON' || e.target.tagName === 'INPUT') return;
+
+        isDragging = true;
+        modalContent.classList.add('dragging');
+
+        const rect = modalContent.getBoundingClientRect();
+        offsetX = e.clientX - rect.left;
+        offsetY = e.clientY - rect.top;
+
+        // Prevent text selection while dragging
+        e.preventDefault();
+    });
+
+    document.addEventListener('mousemove', (e) => {
+        if (!isDragging) return;
+
+        const x = e.clientX - offsetX;
+        const y = e.clientY - offsetY;
+
+        // Keep modal within viewport bounds
+        const maxX = window.innerWidth - modalContent.offsetWidth;
+        const maxY = window.innerHeight - modalContent.offsetHeight;
+
+        modalContent.style.left = `${Math.max(0, Math.min(x, maxX))}px`;
+        modalContent.style.top = `${Math.max(0, Math.min(y, maxY))}px`;
+        modalContent.style.transform = 'none'; // Remove centering transform
+    });
+
+    document.addEventListener('mouseup', () => {
+        if (isDragging) {
+            isDragging = false;
+            modalContent.classList.remove('dragging');
+        }
+    });
+
+    // Add event listeners for individual add buttons
+    modal.querySelectorAll('.event-add-button').forEach(button => {
+        button.addEventListener('click', (e) => {
+            const url = e.target.dataset.url;
+            window.open(url, '_blank');
+            e.target.textContent = '✓ Added';
+            e.target.classList.add('added');
+            e.target.disabled = true;
+        });
+    });
+
+    // Close button
+    modal.querySelector('button.cancel').addEventListener('click', () => {
+        modal.remove();
+    });
+
+    // Close on overlay click (but not when dragging)
     modal.addEventListener('click', (e) => {
-        if (e.target === modal) {
-            cleanup();
+        if (e.target === modal && !isDragging) {
+            modal.remove();
         }
     });
 }
