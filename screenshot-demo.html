@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Team Schedule - Q1 2026</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 40px 20px;
+        }
+
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+        }
+
+        .card {
+            background: white;
+            border-radius: 16px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.2);
+            overflow: hidden;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+            padding: 30px 40px;
+            color: white;
+        }
+
+        .header h1 {
+            font-size: 28px;
+            font-weight: 700;
+            margin-bottom: 8px;
+        }
+
+        .header p {
+            opacity: 0.9;
+            font-size: 16px;
+        }
+
+        .content {
+            padding: 40px;
+        }
+
+        .instruction {
+            background: #f0f7ff;
+            border-left: 4px solid #4facfe;
+            padding: 16px 20px;
+            margin-bottom: 30px;
+            border-radius: 0 8px 8px 0;
+        }
+
+        .instruction h3 {
+            color: #1a73e8;
+            font-size: 14px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 8px;
+        }
+
+        .instruction p {
+            color: #5f6368;
+            font-size: 14px;
+            line-height: 1.5;
+        }
+
+        .events-section h2 {
+            font-size: 20px;
+            color: #202124;
+            margin-bottom: 20px;
+            padding-bottom: 10px;
+            border-bottom: 2px solid #e8eaed;
+        }
+
+        .event-text {
+            background: #fffde7;
+            border: 2px dashed #ffd54f;
+            border-radius: 12px;
+            padding: 24px;
+            font-size: 16px;
+            line-height: 1.8;
+            color: #333;
+            cursor: text;
+            transition: all 0.2s ease;
+        }
+
+        .event-text:hover {
+            border-color: #ffb300;
+            background: #fff8e1;
+        }
+
+        .event-text::selection {
+            background: #bbdefb;
+        }
+
+        .event-item {
+            margin-bottom: 12px;
+            padding-left: 20px;
+            position: relative;
+        }
+
+        .event-item::before {
+            content: "📅";
+            position: absolute;
+            left: 0;
+            top: 0;
+        }
+
+        .event-title {
+            font-weight: 600;
+            color: #1a73e8;
+        }
+
+        .event-time {
+            color: #5f6368;
+        }
+
+        .footer {
+            background: #f8f9fa;
+            padding: 20px 40px;
+            text-align: center;
+            color: #5f6368;
+            font-size: 13px;
+        }
+
+        .badge {
+            display: inline-block;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 6px 14px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+            margin-top: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="card">
+            <div class="header">
+                <h1>📆 Team Schedule - Q1 2026</h1>
+                <p>Upcoming meetings and events for the Engineering team</p>
+            </div>
+
+            <div class="content">
+                <div class="instruction">
+                    <h3>✨ Try Calendar Event Creator</h3>
+                    <p>Select the text below, right-click, and choose "Add to Google Calendar" to extract all events at once!</p>
+                </div>
+
+                <div class="events-section">
+                    <h2>Upcoming Events</h2>
+
+                    <div class="event-text" id="selectable-events">
+                        <div class="event-item">
+                            <span class="event-title">Sprint Planning Meeting</span> - <span class="event-time">Monday, February 3rd 2026 from 9:00 AM to 10:30 AM</span> in Conference Room A. We'll review the backlog and assign tasks for the upcoming sprint.
+                        </div>
+
+                        <div class="event-item">
+                            <span class="event-title">Design Review: Mobile App Redesign</span> - <span class="event-time">Wednesday, February 5th 2026 from 2:00 PM to 3:30 PM</span> via Zoom. The design team will present mockups for feedback.
+                        </div>
+
+                        <div class="event-item">
+                            <span class="event-title">Team Lunch & Learn: Introduction to AI</span> - <span class="event-time">Friday, February 7th 2026 from 12:00 PM to 1:00 PM</span> in the Main Cafeteria. Bring your lunch and learn about AI trends!
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="footer">
+                Demo page for Calendar Event Creator Chrome Extension
+                <br>
+                <span class="badge">v1.2.0 - Multi-Event Support</span>
+            </div>
+        </div>
+    </div>
+</body>
+</html>
