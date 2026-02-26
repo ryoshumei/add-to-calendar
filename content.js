@@ -186,6 +186,7 @@ style.textContent = `
 
 .event-info {
     flex: 1;
+    min-width: 0;
 }
 
 .event-title {
@@ -205,6 +206,7 @@ style.textContent = `
     color: #5f6368;
     font-size: 13px;
     margin: 4px 0;
+    word-break: break-word;
 }
 
 .event-description {
