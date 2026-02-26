@@ -6,8 +6,11 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-extension-version',
 }
+
+// Minimum supported extension version (update when making breaking changes)
+const MIN_SUPPORTED_VERSION = '1.0.0'
 
 interface EventDetails {
   title: string;
@@ -54,7 +57,14 @@ serve(async (req) => {
       throw new Error('Unauthorized')
     }
 
-    console.log(`Processing text for user: ${user.email}`)
+    // Check extension version for compatibility
+    const extensionVersion = req.headers.get('X-Extension-Version') || 'unknown'
+    console.log(`Processing text for user: ${user.email}, extension version: ${extensionVersion}`)
+
+    // Version compatibility check (can reject old versions if needed)
+    if (extensionVersion !== 'unknown' && !isVersionSupported(extensionVersion)) {
+      throw new Error(`Extension version ${extensionVersion} is no longer supported. Please update to the latest version.`)
+    }
 
     // Check and increment usage - must be done before processing
     const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
@@ -305,4 +315,34 @@ async function checkAndIncrementUsage(userId: string, serviceRoleKey: string): P
     limit: MONTHLY_LIMIT,
     yearMonth
   }
+}
+
+/**
+ * Parse version string into array of numbers
+ */
+function parseVersion(v: string): number[] {
+  return v.split('.').map(n => parseInt(n, 10) || 0)
+}
+
+/**
+ * Compare two version strings
+ * Returns: -1 if a < b, 0 if a == b, 1 if a > b
+ */
+function compareVersions(a: string, b: string): number {
+  const vA = parseVersion(a)
+  const vB = parseVersion(b)
+
+  for (let i = 0; i < 3; i++) {
+    if ((vA[i] || 0) > (vB[i] || 0)) return 1
+    if ((vA[i] || 0) < (vB[i] || 0)) return -1
+  }
+  return 0
+}
+
+/**
+ * Check if extension version is supported
+ * Returns true if version >= MIN_SUPPORTED_VERSION
+ */
+function isVersionSupported(version: string): boolean {
+  return compareVersions(version, MIN_SUPPORTED_VERSION) >= 0
 }

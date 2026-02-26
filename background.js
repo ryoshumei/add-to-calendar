@@ -480,11 +480,15 @@ async function processWithBackend(text, accessToken) {
             throw new Error('Authentication required. Please sign in with Google.');
         }
         
+        // Get extension version from manifest
+        const manifest = chrome.runtime.getManifest();
+
         const response = await fetch(CONFIG.EDGE_FUNCTIONS.PROCESS_TEXT, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
                 'Authorization': `Bearer ${accessToken}`,
+                'X-Extension-Version': manifest.version,
             },
             body: JSON.stringify({ selectedText: text })
         });

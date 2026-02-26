@@ -43,6 +43,65 @@ Chrome extension that creates Google Calendar events from selected text using Op
 - **Content Script Injection**: Dynamic injection with retry when script not initially loaded
 - **Session Persistence**: Supabase sessions stored and restored from chrome.storage.local
 
+## Deployment
+
+### Publishing a New Version (IMPORTANT)
+**Always deploy both the backend AND extension together:**
+
+```bash
+# 1. Set Supabase token (get from https://supabase.com/dashboard/account/tokens)
+export SUPABASE_ACCESS_TOKEN=your-token
+
+# 2. Deploy backend function FIRST
+npm run deploy:backend
+
+# 3. Then publish Chrome extension to Web Store
+```
+
+Or use the combined deploy script:
+```bash
+npm run deploy
+```
+
+### Deployment Checklist
+- [ ] Deploy Supabase Edge Function: `npm run deploy:backend`
+- [ ] Update version in manifest.json
+- [ ] Package extension: `npm run package`
+- [ ] Upload to Chrome Web Store Developer Dashboard
+- [ ] Test the published extension
+
+### Files That Require Backend Redeployment
+If you modify these files, you MUST redeploy the Supabase function:
+- `supabase/functions/process-text/index.ts` - Main backend logic
+- Any changes to the OpenAI prompt or model in the backend
+
+### Version Compatibility (IMPORTANT)
+Chrome extension review takes time. To avoid breaking users:
+
+**Safe deployment order for ANY changes:**
+1. Deploy backend that supports BOTH old AND new extension versions
+2. Submit new extension to Chrome Web Store
+3. Wait for approval + users to update (1-2 weeks)
+4. (Optional) Remove old version support from backend
+
+**Example: Changing request/response format**
+```typescript
+// Backend supports both versions
+const version = req.headers.get('X-Extension-Version') || '1.0.0'
+if (compareVersions(version, '1.3.0') >= 0) {
+  // New format for v1.3.0+
+  return { events: [...] }
+} else {
+  // Old format for v1.2.x and below
+  return { event: {...} }
+}
+```
+
+**Version tracking:**
+- Extension sends `X-Extension-Version` header to backend
+- Backend logs version and can handle different formats per version
+- Update `MIN_SUPPORTED_VERSION` in `index.ts` after old versions are phased out
+
 ## Development Commands
 
 ### Extension Development

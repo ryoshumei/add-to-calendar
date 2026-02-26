@@ -14,6 +14,19 @@ OUTPUT_FILE="calendar-event-creator-v${VERSION}.zip"
 
 echo "📦 Packaging Calendar Event Creator v${VERSION} for Chrome Web Store"
 echo "──────────────────────────────────────────────────────────────"
+echo ""
+echo "⚠️  IMPORTANT: Before packaging, ensure Supabase function is deployed!"
+echo "   Command: npm run deploy:backend"
+echo ""
+read -p "Have you deployed the Supabase function? (y/n): " confirmed
+if [[ "$confirmed" != "y" && "$confirmed" != "Y" ]]; then
+    echo ""
+    echo "❌ Packaging cancelled. Please deploy first:"
+    echo "   npm run deploy:backend"
+    echo ""
+    exit 1
+fi
+echo ""
 
 # Remove old package if exists
 if [ -f "$OUTPUT_FILE" ]; then
