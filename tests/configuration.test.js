@@ -95,24 +95,18 @@ test.describe('Configuration Management', () => {
     });
 
     test('should handle storage errors gracefully', async ({ popupPage }) => {
-      // Mock storage error
-      await popupPage.addInitScript(() => {
-        const originalSet = chrome.storage.sync.set;
+      const storageError = await popupPage.evaluate(async () => {
+        const originalSet = chrome.storage.sync.set.bind(chrome.storage.sync);
         chrome.storage.sync.set = () => {
           throw new Error('Storage quota exceeded');
         };
-        // Restore after test
-        setTimeout(() => {
-          chrome.storage.sync.set = originalSet;
-        }, 100);
-      });
-
-      const storageError = await popupPage.evaluate(async () => {
         try {
           await chrome.storage.sync.set({ testKey: 'value' });
           return null;
         } catch (error) {
           return error.message;
+        } finally {
+          chrome.storage.sync.set = originalSet;
         }
       });
 
