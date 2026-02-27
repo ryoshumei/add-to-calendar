@@ -2,7 +2,6 @@
 /node_modules
 /.pnp
 .pnp.js
-package-lock.json
 yarn.lock
 
 # Environment Variables
@@ -60,10 +59,7 @@ Thumbs.db
 
 private/
 /playwright-report/
-/tests/
-/playwright.config.js
 /calendar.svg
-/package.json
 
 # Supabase
 .branches

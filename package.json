@@ -1,0 +1,22 @@
+{
+  "name": "calendar-event-creator",
+  "version": "1.2.0",
+  "description": "Chrome extension that creates Google Calendar events from selected text",
+  "scripts": {
+    "test": "npx playwright test",
+    "test:headed": "npx playwright test --headed",
+    "test:debug": "npx playwright test --debug",
+    "test:ui": "npx playwright test --ui",
+    "deploy:backend": "npx supabase functions deploy process-text",
+    "deploy": "./scripts/deploy.sh",
+    "package": "./scripts/package-extension.sh"
+  },
+  "keywords": [
+    "chrome-extension",
+    "google-calendar",
+    "openai"
+  ],
+  "devDependencies": {
+    "@playwright/test": "^1.58.2"
+  }
+}
