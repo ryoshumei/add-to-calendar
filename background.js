@@ -5,6 +5,7 @@ importScripts('config.js');
 importScripts('scripts/supabase-js.min.js'); // Supabase JavaScript client library
 importScripts('scripts/supabase-client.js');
 importScripts('scripts/calendar-service.js');
+importScripts('scripts/llm-prompt.js');
 
 // Global authentication state
 let supabaseAuth = null;
@@ -553,26 +554,6 @@ async function processWithOpenAI(text, apiKey) {
     const now = new Date();
     const currentDateTime = now.toLocaleString();
 
-    const systemPrompt = `You are a JSON API that extracts event details from text. Return ONLY a raw JSON object with an "events" array containing one or more event objects:
-    {
-        "events": [
-            {
-                "title": "event title",
-                "description": "brief description",
-                "startTime": "YYYY-MM-DDTHH:mm:ss",
-                "endTime": "YYYY-MM-DDTHH:mm:ss",
-                "location": "location if mentioned, include online link if available"
-            }
-        ]
-    }
-    Current time is: ${currentDateTime}
-    For relative dates, use the current time as reference.
-    If no specific time mentioned, assume 10:00 AM for 1 hour.
-    If the text contains multiple events, extract ALL of them as separate objects in the array.
-    If only one event is found, still return it inside the events array.
-    DO NOT include any markdown formatting, code blocks, or extra text.
-    ONLY return the JSON object itself.`;
-
     try {
         const response = await fetch('https://api.openai.com/v1/chat/completions', {
             method: 'POST',
@@ -580,22 +561,7 @@ async function processWithOpenAI(text, apiKey) {
                 'Content-Type': 'application/json',
                 'Authorization': `Bearer ${apiKey}`
             },
-            body: JSON.stringify({
-                model: 'gpt-4.1-mini',
-                messages: [
-                    {
-                        role: 'system',
-                        content: systemPrompt
-                    },
-                    {
-                        role: 'user',
-                        content: `Time: ${currentDateTime}\nText: ${text}`
-                    }
-                ],
-                temperature: 0.3,
-                top_p: 1,
-                response_format: { type: 'json_object' }
-            })
+            body: JSON.stringify(LLM_CONFIG.buildRequestBody(text, currentDateTime))
         });
 
         if (!response.ok) {

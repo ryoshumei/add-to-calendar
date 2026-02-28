@@ -17,6 +17,8 @@ Chrome extension that creates Google Calendar events from selected text using Op
 - **config.js**: Public configuration (Supabase URL, Google OAuth client ID)
 - **scripts/supabase-client.js**: Authentication service using Supabase + Chrome Identity API
 - **scripts/calendar-service.js**: Google Calendar URL generation and event creation
+- **scripts/llm-prompt.js**: LLM prompt template and OpenAI request configuration (client-side)
+- **supabase/functions/_shared/llm-prompt.ts**: LLM prompt template (backend, kept in sync with client)
 
 ### Authentication Flow
 1. User clicks "Sign in with Google" → Chrome Identity API launches OAuth flow
@@ -73,6 +75,7 @@ npm run deploy
 ### Files That Require Backend Redeployment
 If you modify these files, you MUST redeploy the Supabase function:
 - `supabase/functions/process-text/index.ts` - Main backend logic
+- `supabase/functions/_shared/llm-prompt.ts` - Backend LLM prompt configuration
 - Any changes to the OpenAI prompt or model in the backend
 
 ### Version Compatibility (IMPORTANT)
@@ -200,8 +203,7 @@ if (currentUser && supabaseAuth?.isAuthenticated()) {
 - `host_permissions`: Supabase API access (https://*.supabase.co/*)
 
 ### Common Modifications
-- **OpenAI Model**: Update `model: 'gpt-4.1-mini'` in background.js:219
-- **Event Schema**: Modify system prompt (background.js:197-209) and validation (background.js:316-334)
+- **LLM Prompt / Model**: Edit `scripts/llm-prompt.js` (client-side) and `supabase/functions/_shared/llm-prompt.ts` (backend) — these must be kept in sync
 - **UI Styling**: Edit CSS in content.js:8-72 for modal appearance
 - **Supabase Config**: Update SUPABASE_URL and SUPABASE_ANON_KEY in config.js
 - **OAuth Client**: Update oauth2.client_id in manifest.json (requires new Google Cloud OAuth app)
