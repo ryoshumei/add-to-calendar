@@ -8,6 +8,7 @@
     "test:debug": "npx playwright test --debug",
     "test:ui": "npx playwright test --ui",
     "deploy:backend": "npx supabase functions deploy process-text",
+    "deploy:backend:image": "npx supabase functions deploy process-image",
     "deploy": "./scripts/deploy.sh",
     "package": "./scripts/package-extension.sh"
   },
