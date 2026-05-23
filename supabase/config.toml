@@ -68,3 +68,9 @@ verify_jwt = true
 # For production, set these via: supabase secrets set KEY=value
 [functions.process-image.env]
 # OPENAI_API_KEY should be set via: supabase secrets set OPENAI_API_KEY=your_key
+
+[functions.apple-link]
+verify_jwt = true
+
+[functions.delete-account]
+verify_jwt = true
