@@ -140,21 +140,36 @@ async function processImageWithOpenAI(imageDataUrl: string, apiKey: string): Pro
     }
 
     const data = await response.json()
-    console.log('Raw GPT response:', data.choices[0].message.content)
+    const content = data?.choices?.[0]?.message?.content
+    console.log('Raw GPT response:', content)
+
+    // The model returns null/empty content when it finds no event (or declines
+    // an image). Treat that as "no events" instead of crashing the parse.
+    if (!content || !content.trim()) {
+      return { events: [] }
+    }
 
     try {
-      let parsed = JSON.parse(data.choices[0].message.content.trim())
+      // Strip markdown code fences defensively before parsing.
+      const cleaned = content
+        .trim()
+        .replace(/^```(?:json)?\s*/i, '')
+        .replace(/\s*```$/i, '')
+      let parsed = JSON.parse(cleaned)
 
       // Backward compatibility: wrap single event in events array
       if (!parsed.events && parsed.title) {
         parsed = { events: [parsed] }
+      }
+      if (!Array.isArray(parsed.events)) {
+        parsed = { events: [] }
       }
 
       validateEventResponse(parsed)
       return parsed
     } catch (parseError) {
       console.error('JSON Parse Error:', parseError)
-      console.error('Raw content:', data.choices[0].message.content)
+      console.error('Raw content:', content)
       throw new Error('Failed to parse GPT response as JSON')
     }
   } catch (err) {
@@ -168,10 +183,11 @@ async function processImageWithOpenAI(imageDataUrl: string, apiKey: string): Pro
  * Validate event response structure (wrapper with events array)
  */
 function validateEventResponse(response: EventResponse) {
-  if (!response || !Array.isArray(response.events) || response.events.length === 0) {
-    throw new Error('Invalid response: Expected object with events array containing at least one event')
+  if (!response || !Array.isArray(response.events)) {
+    throw new Error('Invalid response: expected an events array')
   }
 
+  // An empty array is valid — the client surfaces it as "No events found".
   response.events.forEach((event, index) => {
     validateSingleEventDetails(event, index)
   })
