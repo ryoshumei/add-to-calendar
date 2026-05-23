@@ -44,7 +44,17 @@ Deno.test("builds a well-formed ES256 client secret JWT", async () => {
   assertEquals(payload.iss, "TEAM123456");
   assertEquals(payload.sub, "com.addtocalendar.rn");
   assertEquals(payload.aud, "https://appleid.apple.com");
-  if (!s || s.length < 10) throw new Error("signature missing");
+  const sigBytes = Uint8Array.from(
+    atob(s.replace(/-/g, "+").replace(/_/g, "/")),
+    (c) => c.charCodeAt(0),
+  );
+  const verified = await crypto.subtle.verify(
+    { name: "ECDSA", hash: "SHA-256" },
+    kp.publicKey,
+    sigBytes,
+    new TextEncoder().encode(`${h}.${p}`),
+  );
+  if (!verified) throw new Error("signature did not verify");
   if ((payload.exp as number) - (payload.iat as number) > 3605) {
     throw new Error("exp must be short-lived");
   }
@@ -62,4 +72,34 @@ Deno.test("rejects when config is missing", async () => {
     Error,
     "not configured",
   );
+});
+
+Deno.test("accepts a PEM with escaped newlines (env-var form)", async () => {
+  const kp = await crypto.subtle.generateKey(
+    { name: "ECDSA", namedCurve: "P-256" },
+    true,
+    ["sign", "verify"],
+  );
+  const pkcs8 = new Uint8Array(
+    await crypto.subtle.exportKey("pkcs8", kp.privateKey),
+  );
+  const escaped = toPem(pkcs8).replace(/\n/g, "\\n"); // single line with literal \n
+  const jwt = await buildAppleClientSecret({
+    teamId: "TEAM123456",
+    keyId: "KEY1234567",
+    clientId: "com.addtocalendar.rn",
+    privateKey: escaped,
+  });
+  const [h, p, s] = jwt.split(".");
+  const sigBytes = Uint8Array.from(
+    atob(s.replace(/-/g, "+").replace(/_/g, "/")),
+    (c) => c.charCodeAt(0),
+  );
+  const verified = await crypto.subtle.verify(
+    { name: "ECDSA", hash: "SHA-256" },
+    kp.publicKey,
+    sigBytes,
+    new TextEncoder().encode(`${h}.${p}`),
+  );
+  if (!verified) throw new Error("escaped-newline PEM produced an invalid signature");
 });
