@@ -29,9 +29,13 @@ serve(async (req) => {
     const { data: { user }, error: authError } = await supabase.auth.getUser();
     if (authError || !user) throw new Error("Unauthorized");
 
+    const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+    if (!serviceRoleKey) {
+      throw new Error("SUPABASE_SERVICE_ROLE_KEY not configured");
+    }
     const admin = createClient(
       Deno.env.get("SUPABASE_URL") ?? "",
-      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "",
+      serviceRoleKey,
       { auth: { autoRefreshToken: false, persistSession: false } },
     );
 
@@ -62,9 +66,23 @@ serve(async (req) => {
       }
     }
 
-    // Delete data + auth user. Deletion always proceeds.
-    await admin.from("apple_refresh_tokens").delete().eq("user_id", user.id);
-    await admin.from("usage_tracking").delete().eq("user_id", user.id);
+    // Delete data + auth user. Deletion always proceeds past the best-effort
+    // revoke above. Errors here are surfaced (not swallowed) so we never report
+    // success while a refresh token or usage row is left orphaned.
+    const { error: tokenDelError } = await admin
+      .from("apple_refresh_tokens")
+      .delete()
+      .eq("user_id", user.id);
+    if (tokenDelError) {
+      throw new Error(`Failed to delete Apple token: ${tokenDelError.message}`);
+    }
+    const { error: usageDelError } = await admin
+      .from("usage_tracking")
+      .delete()
+      .eq("user_id", user.id);
+    if (usageDelError) {
+      throw new Error(`Failed to delete usage rows: ${usageDelError.message}`);
+    }
     const { error: delError } = await admin.auth.admin.deleteUser(user.id);
     if (delError) throw new Error(`Failed to delete user: ${delError.message}`);
 
