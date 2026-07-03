@@ -165,6 +165,13 @@ style.textContent = `
     overflow-y: auto;
 }
 
+.no-events-message {
+    padding: 24px 16px;
+    text-align: center;
+    color: #5f6368;
+    font-size: 14px;
+}
+
 .event-card {
     margin: 12px 0;
     padding: 15px;
@@ -707,8 +714,10 @@ function showConfirmationModal(events, fallbackCalendarUrl) {
         return date.toLocaleString();
     };
 
-    // Generate event cards HTML
-    const eventsHtml = events.map((event, index) => {
+    // Generate event cards HTML (empty state when no events were found)
+    const eventsHtml = events.length === 0
+        ? '<div class="no-events-message">No events were found in the selected text.</div>'
+        : events.map((event, index) => {
         const calendarUrl = createGoogleCalendarUrlForContent(event);
         return `
             <div class="event-card" data-index="${index}">
@@ -740,7 +749,7 @@ function showConfirmationModal(events, fallbackCalendarUrl) {
                 <div class="header-title">
                     <h2>Add to Google Calendar</h2>
                 </div>
-                <span class="events-count">${events.length} event${events.length > 1 ? 's' : ''}</span>
+                <span class="events-count">${events.length} event${events.length !== 1 ? 's' : ''}</span>
             </div>
             <div class="events-list">
                 ${eventsHtml}

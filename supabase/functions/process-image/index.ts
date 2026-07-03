@@ -7,6 +7,8 @@ import { LLM_CONFIG } from '../_shared/llm-prompt.ts'
 import { checkAndIncrementUsage, refundUsage } from '../_shared/usage-tracking.ts'
 import type { UsageInfo, UsageTrackingClient } from '../_shared/usage-tracking.ts'
 import { ApiError, mapOpenAIError } from '../_shared/api-error.ts'
+import { parseEventResponse } from '../_shared/parse-event-response.ts'
+import type { EventResponse } from '../_shared/parse-event-response.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -15,18 +17,6 @@ const corsHeaders = {
 
 // Minimum supported client version (update when making breaking changes)
 const MIN_SUPPORTED_VERSION = '1.0.0'
-
-interface EventDetails {
-  title: string;
-  description: string;
-  startTime: string;
-  endTime: string;
-  location?: string;
-}
-
-interface EventResponse {
-  events: EventDetails[];
-}
 
 serve(async (req) => {
   // Handle CORS preflight requests
@@ -170,35 +160,8 @@ async function processImageWithOpenAI(imageDataUrl: string, apiKey: string): Pro
     const content = data?.choices?.[0]?.message?.content
     console.log('Raw GPT response:', content)
 
-    // The model returns null/empty content when it finds no event (or declines
-    // an image). Treat that as "no events" instead of crashing the parse.
-    if (!content || !content.trim()) {
-      return { events: [] }
-    }
-
-    try {
-      // Strip markdown code fences defensively before parsing.
-      const cleaned = content
-        .trim()
-        .replace(/^```(?:json)?\s*/i, '')
-        .replace(/\s*```$/i, '')
-      let parsed = JSON.parse(cleaned)
-
-      // Backward compatibility: wrap single event in events array
-      if (!parsed.events && parsed.title) {
-        parsed = { events: [parsed] }
-      }
-      if (!Array.isArray(parsed.events)) {
-        parsed = { events: [] }
-      }
-
-      validateEventResponse(parsed)
-      return parsed
-    } catch (parseError) {
-      console.error('JSON Parse Error:', parseError)
-      console.error('Raw content:', content)
-      throw new Error('Failed to parse GPT response as JSON')
-    }
+    // Empty/null content and an empty events array are valid no-event results
+    return parseEventResponse(content)
   } catch (err) {
     const error = err instanceof Error ? err : new Error(String(err))
     if (error instanceof ApiError) {
@@ -206,41 +169,6 @@ async function processImageWithOpenAI(imageDataUrl: string, apiKey: string): Pro
     }
     console.error('Error calling OpenAI API:', error)
     throw new Error('Failed to process image: ' + error.message)
-  }
-}
-
-/**
- * Validate event response structure (wrapper with events array)
- */
-function validateEventResponse(response: EventResponse) {
-  if (!response || !Array.isArray(response.events)) {
-    throw new Error('Invalid response: expected an events array')
-  }
-
-  // An empty array is valid — the client surfaces it as "No events found".
-  response.events.forEach((event, index) => {
-    validateSingleEventDetails(event, index)
-  })
-}
-
-/**
- * Validate single event details structure and content
- */
-function validateSingleEventDetails(details: EventDetails, index: number = 0) {
-  const required = ['title', 'startTime', 'endTime']
-  const missing = required.filter(field => !details[field as keyof EventDetails])
-
-  if (missing.length > 0) {
-    throw new Error(`Event ${index + 1}: Missing required fields: ${missing.join(', ')}`)
-  }
-
-  const dateTimeRegex = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/
-  if (!dateTimeRegex.test(details.startTime) || !dateTimeRegex.test(details.endTime)) {
-    throw new Error(`Event ${index + 1}: Invalid datetime format`)
-  }
-
-  if (new Date(details.startTime) >= new Date(details.endTime)) {
-    throw new Error(`Event ${index + 1}: Start time must be before end time`)
   }
 }
 

@@ -7,6 +7,8 @@ import { LLM_CONFIG } from '../_shared/llm-prompt.ts'
 import { checkAndIncrementUsage, refundUsage } from '../_shared/usage-tracking.ts'
 import type { UsageInfo, UsageTrackingClient } from '../_shared/usage-tracking.ts'
 import { ApiError, mapOpenAIError } from '../_shared/api-error.ts'
+import { parseEventResponse } from '../_shared/parse-event-response.ts'
+import type { EventResponse } from '../_shared/parse-event-response.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -15,18 +17,6 @@ const corsHeaders = {
 
 // Minimum supported extension version (update when making breaking changes)
 const MIN_SUPPORTED_VERSION = '1.0.0'
-
-interface EventDetails {
-  title: string;
-  description: string;
-  startTime: string;
-  endTime: string;
-  location?: string;
-}
-
-interface EventResponse {
-  events: EventDetails[];
-}
 
 serve(async (req) => {
   // Handle CORS preflight requests
@@ -169,23 +159,11 @@ async function processWithOpenAI(text: string, apiKey: string): Promise<EventRes
     }
 
     const data = await response.json()
-    console.log('Raw GPT response:', data.choices[0].message.content)
+    const content = data?.choices?.[0]?.message?.content
+    console.log('Raw GPT response:', content)
 
-    try {
-      let response = JSON.parse(data.choices[0].message.content.trim())
-
-      // Backward compatibility: wrap single event in events array
-      if (!response.events && response.title) {
-        response = { events: [response] }
-      }
-
-      validateEventResponse(response)
-      return response
-    } catch (parseError) {
-      console.error('JSON Parse Error:', parseError)
-      console.error('Raw content:', data.choices[0].message.content)
-      throw new Error('Failed to parse GPT response as JSON')
-    }
+    // Empty events is a valid outcome (no event in the selected text)
+    return parseEventResponse(content)
   } catch (err) {
     const error = err instanceof Error ? err : new Error(String(err))
     if (error instanceof ApiError) {
@@ -193,43 +171,6 @@ async function processWithOpenAI(text: string, apiKey: string): Promise<EventRes
     }
     console.error('Error calling OpenAI API:', error)
     throw new Error('Failed to process text: ' + error.message)
-  }
-}
-
-/**
- * Validate event response structure (wrapper with events array)
- */
-function validateEventResponse(response: EventResponse) {
-  if (!response || !Array.isArray(response.events) || response.events.length === 0) {
-    throw new Error('Invalid response: Expected object with events array containing at least one event')
-  }
-
-  // Validate each event in the array
-  response.events.forEach((event, index) => {
-    validateSingleEventDetails(event, index)
-  })
-}
-
-/**
- * Validate single event details structure and content
- */
-function validateSingleEventDetails(details: EventDetails, index: number = 0) {
-  const required = ['title', 'startTime', 'endTime']
-  const missing = required.filter(field => !details[field as keyof EventDetails])
-
-  if (missing.length > 0) {
-    throw new Error(`Event ${index + 1}: Missing required fields: ${missing.join(', ')}`)
-  }
-
-  // Validate datetime format
-  const dateTimeRegex = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/
-  if (!dateTimeRegex.test(details.startTime) || !dateTimeRegex.test(details.endTime)) {
-    throw new Error(`Event ${index + 1}: Invalid datetime format`)
-  }
-
-  // Ensure start time is before end time
-  if (new Date(details.startTime) >= new Date(details.endTime)) {
-    throw new Error(`Event ${index + 1}: Start time must be before end time`)
   }
 }
 
