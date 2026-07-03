@@ -660,9 +660,10 @@ function createBasicEventFromText(text) {
 }
 
 // Validate event response structure (wrapper with events array)
+// An empty array is valid — the modal surfaces it as "no events found".
 function validateEventResponse(response) {
-    if (!response || !Array.isArray(response.events) || response.events.length === 0) {
-        throw new Error('Invalid response: Expected object with events array containing at least one event');
+    if (!response || !Array.isArray(response.events)) {
+        throw new Error('Invalid response: expected an events array');
     }
 
     // Validate each event in the array
