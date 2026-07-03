@@ -4,6 +4,9 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { LLM_CONFIG } from '../_shared/llm-prompt.ts'
+import { checkAndIncrementUsage, refundUsage } from '../_shared/usage-tracking.ts'
+import type { UsageInfo, UsageTrackingClient } from '../_shared/usage-tracking.ts'
+import { ApiError, mapOpenAIError } from '../_shared/api-error.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -25,19 +28,17 @@ interface EventResponse {
   events: EventDetails[];
 }
 
-interface UsageInfo {
-  usageCount: number;
-  limit: number;
-  yearMonth: string;
-}
-
-const MONTHLY_LIMIT = 50;
-
 serve(async (req) => {
   // Handle CORS preflight requests
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders })
   }
+
+  // Refund bookkeeping: set once usage has been charged, so a later failure
+  // can return the request to the user's monthly allowance.
+  let admin: UsageTrackingClient | null = null
+  let chargedUsage: UsageInfo | null = null
+  let chargedUserId: string | null = null
 
   try {
     // Get user from auth header
@@ -73,7 +74,22 @@ serve(async (req) => {
       throw new Error('SUPABASE_SERVICE_ROLE_KEY not configured')
     }
 
-    const usageInfo = await checkAndIncrementUsage(user.id, serviceRoleKey)
+    // Service role client bypasses RLS; also used for refunds on failure
+    const adminClient = createClient(
+      Deno.env.get('SUPABASE_URL') ?? '',
+      serviceRoleKey,
+      {
+        auth: {
+          autoRefreshToken: false,
+          persistSession: false
+        }
+      }
+    ) as unknown as UsageTrackingClient
+    admin = adminClient
+
+    const usageInfo = await checkAndIncrementUsage(adminClient, user.id)
+    chargedUsage = usageInfo
+    chargedUserId = user.id
 
     // Get request body
     const { selectedText } = await req.json()
@@ -101,8 +117,18 @@ serve(async (req) => {
       }
     )
 
-  } catch (error) {
+  } catch (err) {
+    const error = err instanceof Error ? err : new Error(String(err))
     console.error('Error processing text:', error)
+
+    // The request was charged but produced no result — give it back.
+    if (admin && chargedUsage && chargedUserId) {
+      await refundUsage(admin, chargedUserId, chargedUsage.yearMonth)
+    }
+
+    const status = error instanceof ApiError
+      ? error.status
+      : error.message === 'Unauthorized' ? 401 : 400
 
     return new Response(
       JSON.stringify({
@@ -111,7 +137,7 @@ serve(async (req) => {
       }),
       {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        status: error.message === 'Unauthorized' ? 401 : 400
+        status
       }
     )
   }
@@ -137,7 +163,9 @@ async function processWithOpenAI(text: string, apiKey: string): Promise<EventRes
 
     if (!response.ok) {
       const errorData = await response.json()
-      throw new Error(errorData.error?.message || 'OpenAI API request failed')
+      // Keep the raw provider error in server logs for the operator
+      console.error('OpenAI API error response:', response.status, JSON.stringify(errorData))
+      throw mapOpenAIError(response.status, errorData)
     }
 
     const data = await response.json()
@@ -158,7 +186,11 @@ async function processWithOpenAI(text: string, apiKey: string): Promise<EventRes
       console.error('Raw content:', data.choices[0].message.content)
       throw new Error('Failed to parse GPT response as JSON')
     }
-  } catch (error) {
+  } catch (err) {
+    const error = err instanceof Error ? err : new Error(String(err))
+    if (error instanceof ApiError) {
+      throw error
+    }
     console.error('Error calling OpenAI API:', error)
     throw new Error('Failed to process text: ' + error.message)
   }
@@ -198,88 +230,6 @@ function validateSingleEventDetails(details: EventDetails, index: number = 0) {
   // Ensure start time is before end time
   if (new Date(details.startTime) >= new Date(details.endTime)) {
     throw new Error(`Event ${index + 1}: Start time must be before end time`)
-  }
-}
-
-/**
- * Check and increment usage for a user
- * Returns current usage info and throws if limit exceeded
- */
-async function checkAndIncrementUsage(userId: string, serviceRoleKey: string): Promise<UsageInfo> {
-  // Create service role client to bypass RLS
-  const supabaseAdmin = createClient(
-    Deno.env.get('SUPABASE_URL') ?? '',
-    serviceRoleKey,
-    {
-      auth: {
-        autoRefreshToken: false,
-        persistSession: false
-      }
-    }
-  )
-
-  // Get current year-month (e.g., "2025-10")
-  const now = new Date()
-  const yearMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
-
-  // Get current usage for this user and month
-  const { data: existingUsage, error: fetchError } = await supabaseAdmin
-    .from('usage_tracking')
-    .select('usage_count')
-    .eq('user_id', userId)
-    .eq('year_month', yearMonth)
-    .single()
-
-  if (fetchError && fetchError.code !== 'PGRST116') { // PGRST116 = not found
-    console.error('Error fetching usage:', fetchError)
-    throw new Error('Failed to check usage limit')
-  }
-
-  const currentUsage = existingUsage?.usage_count || 0
-
-  // Check if limit exceeded
-  if (currentUsage >= MONTHLY_LIMIT) {
-    const usageInfo: UsageInfo = {
-      usageCount: currentUsage,
-      limit: MONTHLY_LIMIT,
-      yearMonth
-    }
-    throw new Error(`Monthly limit exceeded. You have used ${currentUsage}/${MONTHLY_LIMIT} requests this month.`)
-  }
-
-  // Increment usage (upsert: insert if not exists, update if exists)
-  const newCount = currentUsage + 1
-
-  console.log(`Attempting to upsert usage for user ${userId}: ${currentUsage} -> ${newCount}`)
-
-  const { data: upsertedData, error: upsertError } = await supabaseAdmin
-    .from('usage_tracking')
-    .upsert({
-      user_id: userId,
-      year_month: yearMonth,
-      usage_count: newCount,
-      updated_at: new Date().toISOString()
-    }, {
-      onConflict: 'user_id,year_month'
-    })
-    .select()
-    .single()
-
-  if (upsertError) {
-    console.error('Error updating usage:', upsertError)
-    throw new Error('Failed to update usage tracking: ' + upsertError.message)
-  }
-
-  console.log(`✅ Usage updated successfully for user ${userId}:`, {
-    oldCount: currentUsage,
-    newCount: newCount,
-    dbRecord: upsertedData
-  })
-
-  return {
-    usageCount: newCount,
-    limit: MONTHLY_LIMIT,
-    yearMonth
   }
 }
 
