@@ -70,6 +70,83 @@ style.textContent = `
     color: #202124;
 }
 
+/* iOS app cross-promo strip (shown under the extracted events) */
+.gc-ios-promo {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin: 18px 0 0;
+    padding: 11px 14px;
+    border-radius: 12px;
+    text-decoration: none;
+    color: #fff;
+    box-sizing: border-box;
+    background:
+        radial-gradient(120% 160% at 100% 0%, rgba(99, 102, 241, .5), transparent 55%),
+        radial-gradient(120% 160% at 0% 100%, rgba(10, 132, 255, .42), transparent 50%),
+        linear-gradient(150deg, #1b1840, #25224d 55%, #1a1736);
+    box-shadow: 0 6px 16px -8px rgba(20, 18, 55, .7), inset 0 0 0 1px rgba(255, 255, 255, .09);
+    transition: transform .2s ease, box-shadow .2s ease;
+}
+.gc-ios-promo:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 10px 22px -10px rgba(20, 18, 55, .85), inset 0 0 0 1px rgba(255, 255, 255, .13);
+}
+.gc-ios-promo__icon {
+    flex: 0 0 auto;
+    width: 36px;
+    height: 36px;
+    display: grid;
+    place-items: center;
+    border-radius: 9px;
+    background: linear-gradient(150deg, #6d5efc, #0a84ff 92%);
+    box-shadow: 0 3px 8px -2px rgba(10, 132, 255, .5), inset 0 1px 0 rgba(255, 255, 255, .4);
+}
+.gc-ios-promo__copy {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    flex: 1;
+    min-width: 0;
+}
+.gc-ios-promo__eyebrow {
+    font: 700 9px/1.2 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    letter-spacing: .14em;
+    text-transform: uppercase;
+    color: #a5b4fc;
+}
+.gc-ios-promo__title {
+    font: 600 13px/1.3 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    color: #fff;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.gc-ios-promo__badge {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 5px 10px;
+    border-radius: 7px;
+    background: #fff;
+    color: #15152b;
+    font: 600 11px/1 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    box-shadow: 0 2px 6px -2px rgba(0, 0, 0, .35);
+}
+.gc-ios-promo__badge svg { color: #15152b; }
+.gc-ios-promo__chev {
+    flex: 0 0 auto;
+    color: rgba(255, 255, 255, .5);
+    font-size: 18px;
+    line-height: 1;
+    transition: transform .2s ease, color .2s ease;
+}
+.gc-ios-promo:hover .gc-ios-promo__chev {
+    transform: translateX(3px);
+    color: rgba(255, 255, 255, .85);
+}
+
 /* Status modal styles */
 .status-modal {
     background: white;
@@ -754,6 +831,25 @@ function showConfirmationModal(events, fallbackCalendarUrl) {
             <div class="events-list">
                 ${eventsHtml}
             </div>
+            <a class="gc-ios-promo" href="https://apps.apple.com/app/id6772644308" target="_blank" rel="noopener" aria-label="Get Add to Calendar: AI Events on the App Store">
+                <span class="gc-ios-promo__icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" width="20" height="20" fill="none">
+                        <rect x="3.2" y="4.6" width="17.6" height="16" rx="4.4" fill="#fff" fill-opacity=".18"/>
+                        <path d="M3.2 9.2h17.6" stroke="#fff" stroke-opacity=".5" stroke-width="1.3"/>
+                        <path d="M8 3.2v3M16 3.2v3" stroke="#fff" stroke-width="1.7" stroke-linecap="round"/>
+                        <path d="M15.7 12.6l.74 1.62 1.62.74-1.62.74-.74 1.62-.74-1.62-1.62-.74 1.62-.74.74-1.62Z" fill="#fff"/>
+                    </svg>
+                </span>
+                <span class="gc-ios-promo__copy">
+                    <span class="gc-ios-promo__eyebrow">Now on iPhone</span>
+                    <span class="gc-ios-promo__title">Snap a screenshot → calendar event</span>
+                </span>
+                <span class="gc-ios-promo__badge">
+                    <svg viewBox="0 0 14 17" width="11" height="13" aria-hidden="true"><path fill="currentColor" d="M11.57 9.02c-.02-1.9 1.55-2.81 1.62-2.86-.88-1.3-2.26-1.48-2.75-1.5-1.17-.12-2.28.69-2.87.69-.59 0-1.5-.67-2.47-.66-1.27.02-2.44.74-3.09 1.88-1.32 2.29-.34 5.68.95 7.54.63.91 1.38 1.93 2.36 1.9.95-.04 1.31-.61 2.46-.61 1.14 0 1.47.61 2.47.59 1.02-.02 1.67-.93 2.29-1.84.72-1.05 1.02-2.07 1.04-2.12-.02-.01-2-.77-2.02-3.04zM9.67 3.5c.52-.63.87-1.51.78-2.39-.75.03-1.66.5-2.2 1.13-.48.55-.9 1.44-.79 2.3.84.06 1.69-.42 2.21-1.04z"/></svg>
+                    App Store
+                </span>
+                <span class="gc-ios-promo__chev" aria-hidden="true">›</span>
+            </a>
             <div class="calendar-modal-buttons">
                 <button class="cancel">Close</button>
             </div>
