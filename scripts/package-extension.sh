@@ -47,6 +47,7 @@ zip -r "$OUTPUT_FILE" \
     popup/ \
     scripts/supabase-client.js \
     scripts/calendar-service.js \
+    scripts/llm-prompt.js \
     scripts/supabase-js.min.js \
     icons/ \
     -x "*.DS_Store" "*.git*" "*/.*" \
@@ -60,7 +61,7 @@ if [ $? -eq 0 ]; then
     echo "💾 Size: $FILE_SIZE"
     echo ""
     echo "📋 Contents:"
-    unzip -l "$OUTPUT_FILE" | tail -n +4 | head -n -2
+    unzip -l "$OUTPUT_FILE" | tail -n +4 | sed '$d' | sed '$d'
     echo ""
     echo "🚀 Ready to upload to Chrome Web Store!"
     echo "   Dashboard: https://chrome.google.com/webstore/devconsole"
