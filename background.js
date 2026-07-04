@@ -570,24 +570,40 @@ async function processWithOpenAI(text, apiKey) {
         }
 
         const data = await response.json();
+        const content = data?.choices?.[0]?.message?.content;
         // Log the raw response for debugging
-        console.log('Raw GPT response:', data.choices[0].message.content);
+        console.log('Raw GPT response:', content);
 
+        // Mirrors supabase/functions/_shared/parse-event-response.ts —
+        // empty/null content and an empty events array are valid no-event results.
+        if (!content || !content.trim()) {
+            return { events: [] };
+        }
+
+        const cleaned = content
+            .trim()
+            .replace(/^```(?:json)?\s*/i, '')
+            .replace(/\s*```$/i, '');
+
+        let parsed;
         try {
-            let response = JSON.parse(data.choices[0].message.content.trim());
-
-            // Backward compatibility: wrap single event in events array
-            if (!response.events && response.title) {
-                response = { events: [response] };
-            }
-
-            validateEventResponse(response);
-            return response;
+            parsed = JSON.parse(cleaned);
         } catch (parseError) {
             console.error('JSON Parse Error:', parseError);
-            console.error('Raw content:', data.choices[0].message.content);
+            console.error('Raw content:', content);
             throw new Error('Failed to parse GPT response as JSON');
         }
+
+        // Backward compatibility: wrap single event in events array
+        if (!Array.isArray(parsed.events) && parsed.title) {
+            parsed = { events: [parsed] };
+        }
+        if (!Array.isArray(parsed.events)) {
+            parsed = { events: [] };
+        }
+
+        validateEventResponse(parsed);
+        return parsed;
     } catch (error) {
         console.error('Error calling OpenAI API:', error);
         throw new Error('Failed to process text: ' + error.message);
