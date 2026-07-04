@@ -11,6 +11,115 @@ body {
     gap: 16px;
 }
 
+/* iOS app cross-promo — premium app card */
+.ios-promo {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 13px 14px;
+    border-radius: 14px;
+    text-decoration: none;
+    overflow: hidden;
+    isolation: isolate;
+    color: #fff;
+    background:
+        radial-gradient(120% 140% at 100% 0%, rgba(99, 102, 241, .55), transparent 55%),
+        radial-gradient(120% 160% at 0% 100%, rgba(10, 132, 255, .45), transparent 50%),
+        linear-gradient(150deg, #1b1840, #25224d 55%, #1a1736);
+    box-shadow: 0 6px 18px -8px rgba(20, 18, 55, .85), inset 0 1px 0 rgba(255, 255, 255, .07);
+    transition: transform .25s cubic-bezier(.2, .7, .3, 1), box-shadow .25s ease;
+    animation: iosPromoIn .55s cubic-bezier(.2, .7, .3, 1) both;
+}
+.ios-promo::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    border: 1px solid rgba(255, 255, 255, .09);
+    pointer-events: none;
+}
+.ios-promo:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 12px 26px -10px rgba(20, 18, 55, .95), inset 0 1px 0 rgba(255, 255, 255, .12);
+}
+.ios-promo:active { transform: translateY(0); }
+
+.ios-promo__icon {
+    flex: 0 0 auto;
+    width: 42px;
+    height: 42px;
+    display: grid;
+    place-items: center;
+    border-radius: 11px;
+    background: linear-gradient(150deg, #6d5efc, #0a84ff 92%);
+    box-shadow: 0 4px 10px -2px rgba(10, 132, 255, .55), inset 0 1px 0 rgba(255, 255, 255, .4);
+}
+
+.ios-promo__copy {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+    flex: 1;
+}
+.ios-promo__eyebrow {
+    font-size: 9.5px;
+    font-weight: 700;
+    letter-spacing: .14em;
+    text-transform: uppercase;
+    color: #a5b4fc;
+}
+.ios-promo__title {
+    font-size: 14px;
+    font-weight: 650;
+    letter-spacing: -.01em;
+    color: #fff;
+}
+.ios-promo__sub {
+    font-size: 11px;
+    color: rgba(255, 255, 255, .62);
+}
+.ios-promo__badge {
+    display: inline-flex;
+    align-items: center;
+    align-self: flex-start;
+    gap: 5px;
+    margin-top: 7px;
+    padding: 4px 9px;
+    font-size: 10.5px;
+    font-weight: 600;
+    letter-spacing: -.01em;
+    color: #15152b;
+    background: #fff;
+    border-radius: 7px;
+    box-shadow: 0 2px 6px -2px rgba(0, 0, 0, .4);
+}
+.ios-promo__apple {
+    color: #15152b;
+    margin-top: -1px;
+}
+.ios-promo__chev {
+    flex: 0 0 auto;
+    display: grid;
+    place-items: center;
+    color: rgba(255, 255, 255, .45);
+    transition: transform .25s cubic-bezier(.2, .7, .3, 1), color .25s ease;
+}
+.ios-promo:hover .ios-promo__chev {
+    transform: translateX(3px);
+    color: rgba(255, 255, 255, .85);
+}
+
+@keyframes iosPromoIn {
+    from { opacity: 0; transform: translateY(8px) scale(.985); }
+    to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+@media (prefers-reduced-motion: reduce) {
+    .ios-promo { animation: none; }
+    .ios-promo, .ios-promo__chev { transition: none; }
+}
+
 h2 {
     margin: 0;
     color: #1a1a1a;
