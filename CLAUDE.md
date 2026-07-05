@@ -130,6 +130,16 @@ npm install:deps          # Install browser system dependencies
 - `tests/utils/`: Test helper utilities
 - **Configuration**: playwright.config.js defines test settings, reporters (HTML, JSON, list)
 
+### Prompt Evals (live LLM, opt-in)
+Real-text extraction cases run against the actual prompt + parser via OpenAI:
+```bash
+OPENAI_API_KEY=sk-... npm run eval:prompt
+```
+- Cases live in `supabase/functions/_shared/eval-cases.ts` — add a case whenever a real-world text extracts wrongly (name it after the source, e.g. `famima-receipt-jp`)
+- Skipped without `OPENAI_API_KEY`; never runs in CI (live API, costs money, nondeterministic)
+- **Run before deploying any change to the LLM prompt or model** — a full run costs well under $0.01 on gpt-4.1-mini
+- The matcher logic (`assertEventsMatch`) is unit-tested in the regular suite (`eval-cases.test.ts`)
+
 ### Debugging
 - **Background script**: chrome://extensions/ → Extension details → "service worker" link
 - **Content script**: F12 on any webpage → Console tab (content.js logs appear here)
@@ -203,7 +213,7 @@ if (currentUser && supabaseAuth?.isAuthenticated()) {
 - `host_permissions`: Supabase API access (https://*.supabase.co/*)
 
 ### Common Modifications
-- **LLM Prompt / Model**: Edit `scripts/llm-prompt.js` (client-side) and `supabase/functions/_shared/llm-prompt.ts` (backend) — these must be kept in sync
+- **LLM Prompt / Model**: Edit `scripts/llm-prompt.js` (client-side) and `supabase/functions/_shared/llm-prompt.ts` (backend) — these must be kept in sync (CI enforces byte-identical prompts via `tests/llm-prompt-sync.test.js`). Run `npm run eval:prompt` before deploying prompt changes
 - **UI Styling**: Edit CSS in content.js:8-72 for modal appearance
 - **Supabase Config**: Update SUPABASE_URL and SUPABASE_ANON_KEY in config.js
 - **OAuth Client**: Update oauth2.client_id in manifest.json (requires new Google Cloud OAuth app)
