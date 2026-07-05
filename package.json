@@ -7,6 +7,7 @@
     "test:headed": "npx playwright test --headed",
     "test:debug": "npx playwright test --debug",
     "test:ui": "npx playwright test --ui",
+    "eval:prompt": "deno test --allow-net --allow-env supabase/functions/_shared/llm-prompt.eval.ts",
     "deploy:backend": "npx supabase functions deploy process-text",
     "deploy:backend:image": "npx supabase functions deploy process-image",
     "deploy": "./scripts/deploy.sh",
