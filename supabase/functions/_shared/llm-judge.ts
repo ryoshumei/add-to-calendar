@@ -170,3 +170,80 @@ export function makeBaseline(
     itemCount: agg.itemCount,
   };
 }
+
+import type { EventDetails } from "./parse-event-response.ts";
+
+export const DEFAULT_JUDGE_MODEL = "gpt-4.1";
+
+export function buildJudgeRequest(
+  text: string,
+  fixedNow: string,
+  events: EventDetails[],
+  judgeModel: string,
+): Record<string, unknown> {
+  const system =
+    `You are a strict evaluator of calendar-event extraction quality. ` +
+    `Given a source text and the events extracted from it, score each dimension as an integer 1-5:\n` +
+    `- eventCount: is the number of extracted events correct for this text? For texts with no date/time, correct means zero events (extracting one is hallucination).\n` +
+    `- times: are startTime/endTime faithful to the text, interpreting relative dates against the reference time?\n` +
+    `- title: concise, informative, and in the SAME LANGUAGE as the source text.\n` +
+    `- description: useful context (amounts, reference numbers, key details), not a mere echo of the title.\n` +
+    `- duration: sensible for the event type when the text does not state one.\n` +
+    `- location: captured when present in the text, clean formatting.\n` +
+    `Set "hardFail": true ONLY for objective factual errors: an extracted date/time that contradicts the text, or a wrong event count on an unambiguous text (including hallucinated events for no-date texts).\n` +
+    `If a dimension is not applicable (e.g. location for a text with no location, or all quality dimensions when zero events is correct), score it 5.\n` +
+    `Add a "rationales" object with a one-line reason for every dimension scored 3 or lower.\n` +
+    `Return ONLY a JSON object: {"scores": {"eventCount": n, "times": n, "title": n, "description": n, "duration": n, "location": n}, "hardFail": boolean, "rationales": {...}}`;
+  const user = `Reference time: ${fixedNow}\n\nSource text:\n${text}\n\nExtracted events JSON:\n${
+    JSON.stringify(events, null, 2)
+  }`;
+  return {
+    model: judgeModel,
+    temperature: 0,
+    response_format: { type: "json_object" },
+    messages: [
+      { role: "system", content: system },
+      { role: "user", content: user },
+    ],
+  };
+}
+
+export function formatReport(
+  agg: Aggregate,
+  baseline: Baseline | null,
+  worst: ItemResult[],
+  erroredIds: string[],
+): string {
+  const lines: string[] = [];
+  lines.push(`Tier-2 judge report — ${agg.itemCount} item(s)`);
+  lines.push("");
+  const delta = (dim: JudgeDimension) => {
+    if (!baseline) return "  —";
+    const d = round2(agg.dimensions[dim] - baseline.dimensions[dim]);
+    return d === 0 ? "  ±0.00" : d > 0 ? ` +${d.toFixed(2)}` : ` ${d.toFixed(2)}`;
+  };
+  for (const dim of JUDGE_DIMENSIONS) {
+    lines.push(
+      `  ${dim.padEnd(12)} ${agg.dimensions[dim].toFixed(2)}${delta(dim)}`,
+    );
+  }
+  const overallDelta = baseline
+    ? ` (baseline ${baseline.overall.toFixed(2)}, ${baseline.date})`
+    : " (no baseline yet)";
+  lines.push(`  ${"overall".padEnd(12)} ${agg.overall.toFixed(2)}${overallDelta}`);
+  if (worst.length > 0) {
+    lines.push("");
+    lines.push("Worst items:");
+    for (const w of worst) {
+      const rationales = w.judge.rationales
+        ? Object.entries(w.judge.rationales).map(([k, v]) => `${k}: ${v}`).join("; ")
+        : "";
+      lines.push(`  ${w.id}${rationales ? ` — ${rationales}` : ""}`);
+    }
+  }
+  if (erroredIds.length > 0) {
+    lines.push("");
+    lines.push(`Errored items (excluded from scores): ${erroredIds.join(", ")}`);
+  }
+  return lines.join("\n");
+}

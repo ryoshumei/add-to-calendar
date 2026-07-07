@@ -190,3 +190,55 @@ Deno.test("makeBaseline snapshots the aggregate with metadata", () => {
   assertEquals(OVERALL_DROP_LIMIT, 0.2);
   assertEquals(DIMENSION_DROP_LIMIT, 0.4);
 });
+
+import { assertStringIncludes } from "https://deno.land/std@0.168.0/testing/asserts.ts";
+import { buildJudgeRequest, DEFAULT_JUDGE_MODEL, formatReport } from "./llm-judge.ts";
+
+Deno.test("buildJudgeRequest: strict judging setup", () => {
+  const body = buildJudgeRequest(
+    "Team meeting tomorrow at 2pm",
+    "7/6/2026, 10:00:00 AM",
+    [{
+      title: "Team meeting",
+      description: "",
+      startTime: "2026-07-07T14:00:00",
+      endTime: "2026-07-07T15:00:00",
+    }],
+    DEFAULT_JUDGE_MODEL,
+  ) as {
+    model: string;
+    temperature: number;
+    response_format: { type: string };
+    messages: Array<{ role: string; content: string }>;
+  };
+  assertEquals(body.model, "gpt-4.1");
+  assertEquals(body.temperature, 0);
+  assertEquals(body.response_format.type, "json_object");
+  const system = body.messages[0].content;
+  for (const dim of ["eventCount", "times", "title", "description", "duration", "location"]) {
+    assertStringIncludes(system, dim);
+  }
+  assertStringIncludes(system, "hardFail");
+  assertStringIncludes(system, "hallucinat");
+  const user = body.messages[1].content;
+  assertStringIncludes(user, "Team meeting tomorrow at 2pm");
+  assertStringIncludes(user, "2026-07-07T14:00:00");
+});
+
+Deno.test("formatReport shows dimensions, deltas, worst items, and errors", () => {
+  const current = agg(4.5);
+  current.dimensions.title = 4.2;
+  const baseline = makeBaseline(agg(4.4), "h", "gpt-4.1-mini", "gpt-4.1", "2026-07-08");
+  const worst = [{ id: "ja-receipt-02", judge: judge(3) }];
+  const report = formatReport(current, baseline, worst, ["en-poster-01"]);
+  assertStringIncludes(report, "title");
+  assertStringIncludes(report, "4.2");
+  assertStringIncludes(report, "ja-receipt-02");
+  assertStringIncludes(report, "en-poster-01");
+  assertStringIncludes(report, "overall");
+});
+
+Deno.test("formatReport handles the no-baseline first run", () => {
+  const report = formatReport(agg(4.0), null, [], []);
+  assertStringIncludes(report, "no baseline");
+});
