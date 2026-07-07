@@ -91,3 +91,82 @@ function itemMean(result: ItemResult): number {
 export function worstItems(results: ItemResult[], n = 3): ItemResult[] {
   return [...results].sort((a, b) => itemMean(a) - itemMean(b)).slice(0, n);
 }
+
+export interface Baseline {
+  date: string;
+  corpusHash: string;
+  extractorModel: string;
+  judgeModel: string;
+  dimensions: Record<JudgeDimension, number>;
+  overall: number;
+  itemCount: number;
+}
+
+export const OVERALL_DROP_LIMIT = 0.2;
+export const DIMENSION_DROP_LIMIT = 0.4;
+
+export interface BaselineComparison {
+  ok: boolean;
+  failures: string[];
+  notes: string[];
+}
+
+export function compareToBaseline(
+  agg: Aggregate,
+  corpusHash: string,
+  baseline: Baseline | null,
+  anyHardFail: boolean,
+): BaselineComparison {
+  const failures: string[] = [];
+  const notes: string[] = [];
+
+  if (anyHardFail) {
+    failures.push("one or more items hard-failed (objective factual error)");
+  }
+
+  if (!baseline) {
+    notes.push("no baseline yet — run with --update-baseline to create one");
+    return { ok: failures.length === 0, failures, notes };
+  }
+
+  if (baseline.corpusHash !== corpusHash) {
+    failures.push(
+      "corpus changed since baseline — comparison refused; refresh with --update-baseline",
+    );
+    return { ok: false, failures, notes };
+  }
+
+  const overallDrop = round2(baseline.overall - agg.overall);
+  if (overallDrop > OVERALL_DROP_LIMIT) {
+    failures.push(
+      `overall dropped ${baseline.overall} -> ${agg.overall} (limit ${OVERALL_DROP_LIMIT})`,
+    );
+  }
+  for (const dim of JUDGE_DIMENSIONS) {
+    const drop = round2(baseline.dimensions[dim] - agg.dimensions[dim]);
+    if (drop > DIMENSION_DROP_LIMIT) {
+      failures.push(
+        `${dim} dropped ${baseline.dimensions[dim]} -> ${agg.dimensions[dim]} (limit ${DIMENSION_DROP_LIMIT})`,
+      );
+    }
+  }
+  return { ok: failures.length === 0, failures, notes };
+}
+
+export function makeBaseline(
+  agg: Aggregate,
+  corpusHash: string,
+  extractorModel: string,
+  judgeModel: string,
+  date: string,
+): Baseline {
+  return {
+    date,
+    corpusHash,
+    extractorModel,
+    judgeModel,
+    dimensions: { ...agg.dimensions },
+    overall: agg.overall,
+    itemCount: agg.itemCount,
+  };
+}
