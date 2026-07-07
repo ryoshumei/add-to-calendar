@@ -60,3 +60,40 @@ export async function corpusHash(raw: string): Promise<string> {
     .map((b) => b.toString(16).padStart(2, "0"))
     .join("");
 }
+
+export interface CellGap {
+  lang: "ja" | "en";
+  category: string;
+  missing: number;
+}
+
+export function missingCells(items: CorpusItem[]): CellGap[] {
+  const gaps: CellGap[] = [];
+  for (const category of CORPUS_CATEGORIES) {
+    for (const lang of CORPUS_LANGS) {
+      const have = items.filter(
+        (i) => i.lang === lang && i.category === category,
+      ).length;
+      if (have < TARGET_PER_CELL) {
+        gaps.push({ lang, category, missing: TARGET_PER_CELL - have });
+      }
+    }
+  }
+  return gaps;
+}
+
+export function nextId(
+  items: CorpusItem[],
+  lang: string,
+  category: string,
+): string {
+  const prefix = `${lang}-${category}-`;
+  let max = 0;
+  for (const i of items) {
+    if (i.id.startsWith(prefix)) {
+      const n = parseInt(i.id.slice(prefix.length), 10);
+      if (!Number.isNaN(n) && n > max) max = n;
+    }
+  }
+  return `${prefix}${String(max + 1).padStart(2, "0")}`;
+}
