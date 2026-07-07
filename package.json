@@ -9,6 +9,7 @@
     "test:ui": "npx playwright test --ui",
     "eval:prompt": "deno test --allow-net --allow-env supabase/functions/_shared/llm-prompt.eval.ts",
     "eval:generate": "deno run --allow-net --allow-env --allow-read --allow-write supabase/functions/_shared/generate-corpus.ts",
+    "eval:judge": "deno test --allow-net --allow-env --allow-read --allow-write supabase/functions/_shared/llm-judge.eval.ts",
     "deploy:backend": "npx supabase functions deploy process-text",
     "deploy:backend:image": "npx supabase functions deploy process-image",
     "deploy": "./scripts/deploy.sh",

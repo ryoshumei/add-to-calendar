@@ -140,6 +140,13 @@ OPENAI_API_KEY=sk-... npm run eval:prompt
 - **Run before deploying any change to the LLM prompt or model** — a full run costs well under $0.01 on gpt-4.1-mini
 - The matcher logic (`assertEventsMatch`) is unit-tested in the regular suite (`eval-cases.test.ts`)
 
+**Tier 2 — scored judge benchmark** (`npm run eval:generate`, `npm run eval:judge`):
+- Synthetic corpus in `supabase/functions/_shared/eval-corpus.jsonl` (32 items, ja/en × 8 categories); grow with `npm run eval:generate` (gap-fill) or `-- --category receipt --count 2` (targeted)
+- Each run: production-path extraction (gpt-4.1-mini) judged by a stronger model (`gpt-4.1`, override via `JUDGE_MODEL`) on six 1–5 dimensions with objective hard-fail rules
+- Compares against committed `eval-baseline.json`; fails on overall drop >0.2, any dimension drop >0.4, any hard-fail, or corpus/baseline hash mismatch
+- Bless improvements explicitly: `npm run eval:judge -- --update-baseline`, then commit the baseline
+- Tier 1 (`eval:prompt`) is the hard pre-deploy gate; Tier 2 measures quality direction when tuning prompts or comparing models
+
 ### Debugging
 - **Background script**: chrome://extensions/ → Extension details → "service worker" link
 - **Content script**: F12 on any webpage → Console tab (content.js logs appear here)
