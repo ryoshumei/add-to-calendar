@@ -57,6 +57,11 @@ Deno.test("validateJudgeResponse rejects out-of-range and non-integer scores", (
     Error,
     "title",
   );
+  assertThrows(
+    () => validateJudgeResponse({ scores: { ...base, duration: 0 }, hardFail: false }),
+    Error,
+    "duration",
+  );
 });
 
 Deno.test("validateJudgeResponse rejects missing hardFail", () => {
@@ -67,6 +72,19 @@ Deno.test("validateJudgeResponse rejects missing hardFail", () => {
       }),
     Error,
     "hardFail",
+  );
+});
+
+Deno.test("validateJudgeResponse rejects non-string rationale values", () => {
+  assertThrows(
+    () =>
+      validateJudgeResponse({
+        scores: { eventCount: 5, times: 5, title: 5, description: 5, duration: 5, location: 5 },
+        hardFail: false,
+        rationales: { title: 42 },
+      }),
+    Error,
+    "rationales",
   );
 });
 

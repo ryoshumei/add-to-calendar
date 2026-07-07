@@ -59,6 +59,11 @@ export function validateJudgeResponse(body: unknown): JudgeResult {
   }
   const result: JudgeResult = { scores, hardFail: candidate.hardFail };
   if (candidate.rationales && typeof candidate.rationales === "object") {
+    for (const [key, value] of Object.entries(candidate.rationales)) {
+      if (typeof value !== "string") {
+        throw new Error(`judge rationales["${key}"] must be a string`);
+      }
+    }
     result.rationales = candidate.rationales as Record<string, string>;
   }
   return result;
