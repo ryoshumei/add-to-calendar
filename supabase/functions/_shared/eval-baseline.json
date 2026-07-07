@@ -1,0 +1,16 @@
+{
+  "date": "2026-07-07",
+  "corpusHash": "1794b951466ee2cc6a45fec91ac54ce592a0839d24dd164ced2b7e6fad70a4a9",
+  "extractorModel": "gpt-4.1-mini",
+  "judgeModel": "gpt-4.1",
+  "dimensions": {
+    "eventCount": 4.69,
+    "times": 4.75,
+    "title": 4.97,
+    "description": 4.56,
+    "duration": 4.41,
+    "location": 4.94
+  },
+  "overall": 4.72,
+  "itemCount": 32
+}
