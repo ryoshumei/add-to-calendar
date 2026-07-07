@@ -139,6 +139,11 @@ Deno.test({
     console.log("\n" + formatReport(agg, baseline, worstItems(results), erroredIds));
 
     if (updateBaseline) {
+      if (anyHardFail) {
+        throw new Error(
+          "refusing to bless a baseline containing hard-fails — fix the failures first",
+        );
+      }
       const next = makeBaseline(
         agg,
         hash,
@@ -148,9 +153,6 @@ Deno.test({
       );
       await Deno.writeTextFile(BASELINE_PATH, JSON.stringify(next, null, 2) + "\n");
       console.log(`\nBaseline written to ${BASELINE_PATH} — commit it to ratchet.`);
-      if (anyHardFail) {
-        throw new Error("refusing to bless a baseline containing hard-fails");
-      }
       return;
     }
 

@@ -70,6 +70,8 @@ Per corpus item:
 - For `no-event` items the judge verifies zero events were extracted (hallucination check); non-applicable dimensions score 5.
 - **Hard-fail rules (objective, not vibes)**: extracted date/time contradicts the source text, or wrong event count on an unambiguous text. Any hard-fail fails the entire run regardless of averages.
 
+> **Amendment (2026-07-08, commit d37be3e):** The first live run showed the original hard-fail wording made the judge contradict the product's deliberate extraction policy. As shipped, the rubric explicitly encodes PRODUCT POLICY — dated records (receipts, card transactions, reservations, deliveries, deadlines) and tentative dated plans are intended extractions (users confirm via the client modal), and a single continuous multi-day range should be ONE spanning event, with splitting scored as an eventCount error (≤2) rather than a hard-fail. hardFail is narrowed to objective errors only: an extracted date/time contradicting the source text, or hallucinated events for texts containing no date/time at all.
+
 ### 4. `eval-baseline.json` (committed) + report
 
 ```json
@@ -142,3 +144,4 @@ CLAUDE.md "Prompt Evals" section grows a Tier 2 subsection: when to run each tie
 - Sub-project 2: content-free production metrics (also trims raw-content console.logs from deployed functions to align with the no-user-data stance).
 - Sub-project 3: opt-in user feedback reporting from extension + iOS app.
 - Optional later: model A/B — run Tier 2 with `EXTRACTOR_MODEL` overridden to compare candidate models on identical corpus + judge.
+- Corpus growth hygiene: generation-time weekday-consistency lint (e.g. 7月14日（水） vs the real weekday) and within-cell near-duplicate detection.
