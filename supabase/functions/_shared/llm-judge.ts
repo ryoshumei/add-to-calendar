@@ -184,13 +184,13 @@ export function buildJudgeRequest(
   const system =
     `You are a strict evaluator of calendar-event extraction quality. ` +
     `Given a source text and the events extracted from it, score each dimension as an integer 1-5:\n` +
-    `- eventCount: is the number of extracted events correct for this text? For texts with no date/time, correct means zero events (extracting one is hallucination).\n` +
+    `- eventCount: is the number of extracted events correct for this text? For texts with no date/time, correct means zero events (extracting one is hallucination). PRODUCT POLICY: any text containing a date or time is meant to yield an event — including dated records such as purchase receipts, card transactions, reservations, deliveries, and deadlines, and including tentative or proposed plans (users confirm before anything is added to their calendar). Judging such extractions as false positives is WRONG. A single continuous multi-day range (e.g. a sale running July 10-15) should be ONE event spanning the range; splitting it into separate start/end events is an eventCount error (score it 2 or lower) but is NOT a hardFail.\n` +
     `- times: are startTime/endTime faithful to the text, interpreting relative dates against the reference time?\n` +
     `- title: concise, informative, and in the SAME LANGUAGE as the source text.\n` +
     `- description: useful context (amounts, reference numbers, key details), not a mere echo of the title.\n` +
     `- duration: sensible for the event type when the text does not state one.\n` +
     `- location: captured when present in the text, clean formatting.\n` +
-    `Set "hardFail": true ONLY for objective factual errors: an extracted date/time that contradicts the text, or a wrong event count on an unambiguous text (including hallucinated events for no-date texts).\n` +
+    `Set "hardFail": true ONLY for objective factual errors: an extracted date/time that contradicts the text, or hallucinated events for texts containing no date/time at all.\n` +
     `If a dimension is not applicable (e.g. location for a text with no location, or all quality dimensions when zero events is correct), score it 5.\n` +
     `Add a "rationales" object with a one-line reason for every dimension scored 3 or lower.\n` +
     `Return ONLY a JSON object: {"scores": {"eventCount": n, "times": n, "title": n, "description": n, "duration": n, "location": n}, "hardFail": boolean, "rationales": {...}}`;

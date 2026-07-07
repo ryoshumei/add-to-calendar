@@ -242,3 +242,13 @@ Deno.test("formatReport handles the no-baseline first run", () => {
   const report = formatReport(agg(4.0), null, [], []);
   assertStringIncludes(report, "no baseline");
 });
+
+Deno.test("buildJudgeRequest rubric encodes dated-record product policy", () => {
+  const body = buildJudgeRequest("t", "7/6/2026, 10:00:00 AM", [], DEFAULT_JUDGE_MODEL) as {
+    messages: Array<{ role: string; content: string }>;
+  };
+  const system = body.messages[0].content;
+  assertStringIncludes(system, "receipt");
+  assertStringIncludes(system, "tentative");
+  assertStringIncludes(system, "multi-day");
+});
