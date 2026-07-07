@@ -35,6 +35,9 @@ export function parseArgs(args: string[]): { category?: string; count?: number }
       throw new Error(`unknown flag ${args[i]}`);
     }
   }
+  if (out.count !== undefined && !out.category) {
+    throw new Error("--count requires --category");
+  }
   return out;
 }
 
@@ -69,7 +72,7 @@ export function parseGeneratedText(content: string | null | undefined): string {
   if (!content || !content.trim()) throw new Error("generator returned empty content");
   const parsed = JSON.parse(content) as { text?: unknown };
   if (typeof parsed.text !== "string" || !parsed.text.trim()) {
-    throw new Error('generator response missing "text" field');
+    throw new Error(`generator response missing "text" field`);
   }
   return parsed.text.trim();
 }
@@ -99,7 +102,8 @@ async function main() {
   let raw = "";
   try {
     raw = await Deno.readTextFile(CORPUS_PATH);
-  } catch (_e) {
+  } catch (e) {
+    if (!(e instanceof Deno.errors.NotFound)) throw e;
     // first run — file does not exist yet
   }
   const items = parseCorpusJsonl(raw);

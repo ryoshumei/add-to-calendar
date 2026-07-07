@@ -25,6 +25,10 @@ Deno.test("parseArgs rejects unknown categories and flags", () => {
   assertThrows(() => parseArgs(["--frobnicate"]), Error, "--frobnicate");
 });
 
+Deno.test("parseArgs rejects --count without --category", () => {
+  assertThrows(() => parseArgs(["--count", "3"]), Error, "--count requires --category");
+});
+
 Deno.test("buildGenerationRequest shape and diversity temperature", () => {
   const body = buildGenerationRequest("en", "reservation", "7/6/2026, 10:00:00 AM") as {
     temperature: number;
