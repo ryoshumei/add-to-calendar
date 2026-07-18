@@ -15,6 +15,17 @@ export interface EvalExpectation {
   startDate?: string;
   /** first event's title must contain AT LEAST ONE of these, case-insensitive */
   titleIncludes?: string[];
+  /**
+   * Recurrence expectation for the first event:
+   * - omit → not checked
+   * - null → event must NOT have a recurrence
+   * - object → recurrence must exist and listed fields must match
+   */
+  recurrence?: {
+    frequency: "daily" | "weekly" | "monthly" | "yearly";
+    interval?: number;
+    daysOfWeek?: string[];
+  } | null;
 }
 
 export interface EvalCase {
@@ -76,6 +87,47 @@ export function assertEventsMatch(
     }
   }
 
+  if (expect.recurrence !== undefined) {
+    if (expect.recurrence === null) {
+      if (first.recurrence) {
+        failures.push(
+          `expected no recurrence, got ${JSON.stringify(first.recurrence)}`,
+        );
+      }
+    } else if (!first.recurrence) {
+      failures.push(
+        `expected recurrence ${JSON.stringify(expect.recurrence)}, got none`,
+      );
+    } else {
+      const got = first.recurrence;
+      if (got.frequency !== expect.recurrence.frequency) {
+        failures.push(
+          `recurrence.frequency mismatch: expected ${expect.recurrence.frequency}, got ${got.frequency}`,
+        );
+      }
+      if (
+        expect.recurrence.interval !== undefined &&
+        (got.interval ?? 1) !== expect.recurrence.interval
+      ) {
+        failures.push(
+          `recurrence.interval mismatch: expected ${expect.recurrence.interval}, got ${got.interval ?? 1}`,
+        );
+      }
+      if (expect.recurrence.daysOfWeek) {
+        const gotDays = (got.daysOfWeek ?? []).map((d) => d.toUpperCase())
+          .sort();
+        const wantDays = [...expect.recurrence.daysOfWeek].sort();
+        if (gotDays.join(",") !== wantDays.join(",")) {
+          failures.push(
+            `recurrence.daysOfWeek mismatch: expected ${
+              wantDays.join(",")
+            }, got ${gotDays.join(",") || "(none)"}`,
+          );
+        }
+      }
+    }
+  }
+
   return failures;
 }
 
@@ -112,6 +164,50 @@ Mastercard
       maxEvents: 1,
       startTime: "2026-07-07T14:00:00",
       titleIncludes: ["meeting"],
+      recurrence: null,
+    },
+  },
+  {
+    // Issue #14 acceptance case (iOS repo): weekly recurrence with day-of-week,
+    // startTime anchored to the FIRST occurrence (2026-07-06 is a Monday).
+    name: "recurring-weekly-standup",
+    text: "Team standup every Tuesday 10-10:30am",
+    expect: {
+      minEvents: 1,
+      maxEvents: 1,
+      startTime: "2026-07-07T10:00:00",
+      titleIncludes: ["standup"],
+      recurrence: {
+        frequency: "weekly",
+        daysOfWeek: ["TU"],
+      },
+    },
+  },
+  {
+    name: "recurring-every-other-week",
+    text: "Book club every other Wednesday at 7pm at Riverside Library",
+    expect: {
+      minEvents: 1,
+      maxEvents: 1,
+      startTime: "2026-07-08T19:00:00",
+      titleIncludes: ["book"],
+      recurrence: {
+        frequency: "weekly",
+        interval: 2,
+      },
+    },
+  },
+  {
+    name: "recurring-monthly-meetup",
+    text: "Tokyo JS meetup happens monthly, next one July 15 2026 at 6:30pm",
+    expect: {
+      minEvents: 1,
+      maxEvents: 1,
+      startTime: "2026-07-15T18:30:00",
+      titleIncludes: ["meetup", "js"],
+      recurrence: {
+        frequency: "monthly",
+      },
     },
   },
   {
@@ -152,6 +248,7 @@ Mastercard
       maxEvents: 1,
       startTime: "2026-07-12T19:00:00",
       titleIncludes: ["sushi", "reservation"],
+      recurrence: null,
     },
   },
 ];

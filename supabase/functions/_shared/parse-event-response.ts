@@ -8,6 +8,14 @@ export interface EventDetails {
   startTime: string;
   endTime: string;
   location?: string;
+  // Optional, emitted only for repeating events. Passed through to clients
+  // as-is; the iOS app maps it to EventKit/RRULE. Older clients ignore it.
+  recurrence?: {
+    frequency: "daily" | "weekly" | "monthly" | "yearly";
+    interval?: number;
+    until?: string; // YYYY-MM-DD
+    daysOfWeek?: string[]; // RRULE BYDAY codes, weekly only
+  };
 }
 
 export interface EventResponse {
