@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex">
+  <title>Opening Google Calendar…</title>
+  <style>
+    body { font: 16px/1.5 -apple-system, system-ui, sans-serif; color: #333;
+           display: grid; place-items: center; min-height: 90vh; margin: 0; padding: 16px; text-align: center; }
+    a { color: #1a73e8; }
+    @media (prefers-color-scheme: dark) { body { background: #1c1c1e; color: #eee; } a { color: #8ab4f8; } }
+  </style>
+</head>
+<body>
+  <div id="msg">Opening Google Calendar…</div>
+  <script>
+    // Trampoline for the Add to Calendar iOS app: the Google Calendar app
+    // claims every calendar.google.com URL as a universal link but its
+    // handler drops the RRULE "recur" parameter, so recurring events must
+    // reach the *web* editor. Opening this page (an unclaimed domain) lands
+    // in the user's default browser, and the redirect below does not
+    // re-trigger universal links, so the browser keeps the navigation.
+    //
+    // The target URL travels in the #fragment so event details are never
+    // sent to the web server. Only Google Calendar event-template URLs are
+    // allowed — anything else is refused, so this cannot be used as an
+    // open redirector.
+    (function () {
+      var target = '';
+      try { target = decodeURIComponent(location.hash.slice(1)); } catch (e) {}
+      if (target.indexOf('https://calendar.google.com/calendar/render?action=TEMPLATE') === 0) {
+        var a = document.createElement('a');
+        a.href = target;
+        a.textContent = 'Continue to Google Calendar';
+        var msg = document.getElementById('msg');
+        msg.textContent = '';
+        msg.appendChild(a); // fallback if the automatic redirect is blocked
+        location.replace(target);
+      } else {
+        document.getElementById('msg').textContent =
+          'Missing or unsupported link. This page only opens Google Calendar event templates.';
+      }
+    })();
+  </script>
+  <noscript>JavaScript is required to open the calendar link.</noscript>
+</body>
+</html>
