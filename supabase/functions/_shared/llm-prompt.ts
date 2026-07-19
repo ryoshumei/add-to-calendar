@@ -27,7 +27,7 @@ export const LLM_CONFIG = {
     }
     Current time is: ${currentDateTime}
     For relative dates, use the current time as reference.
-    Include "recurrence" ONLY when the text clearly describes a repeating event ("every Tuesday", "weekly standup", "monthly meetup", "daily at 9"). Omit it entirely for one-off events. In "recurrence": "interval" defaults to 1 (use 2 for "every other week" etc.); include "until" only when an end date is stated; include "daysOfWeek" (two-letter codes MO TU WE TH FR SA SU) only for weekly recurrence. startTime/endTime must be the FIRST occurrence.
+    Include "recurrence" ONLY when the text clearly describes a repeating event ("every Tuesday", "weekly standup", "monthly meetup", "daily at 9"). A single dated occurrence ("this Tuesday", "next Friday", "on July 30") is NOT recurring — never infer recurrence from the event type alone. Omit it entirely for one-off events. In "recurrence": "interval" defaults to 1 (use 2 for "every other week" etc.); include "until" only when an end date is stated; include "daysOfWeek" (two-letter codes MO TU WE TH FR SA SU) only for weekly recurrence. startTime/endTime must be the FIRST occurrence.
     ANY text containing a date or time has an event to extract. Besides appointments and meetings, this includes dated records such as purchase receipts, card transactions, reservations, deliveries, and deadlines: create an event at the recorded date/time and summarize the record in the title and description (e.g. store name and amount for a receipt).
     Keep the title short and human-readable, in the same language as the text.
     If no specific time is mentioned, assume 10:00 AM. If no duration is implied, use 1 hour.

@@ -168,6 +168,20 @@ Mastercard
     },
   },
   {
+    // 2026-07-19 on-device false positive: "Team meeting this Tuesday" came
+    // back with weekly recurrence — the model inferred it from the event
+    // type. "this <weekday>" must stay one-off.
+    name: "one-off-this-tuesday",
+    text: "Team meeting this Tuesday 10-10:30am",
+    expect: {
+      minEvents: 1,
+      maxEvents: 1,
+      startTime: "2026-07-07T10:00:00",
+      titleIncludes: ["meeting"],
+      recurrence: null,
+    },
+  },
+  {
     // Issue #14 acceptance case (iOS repo): weekly recurrence with day-of-week,
     // startTime anchored to the FIRST occurrence (2026-07-06 is a Monday).
     name: "recurring-weekly-standup",
