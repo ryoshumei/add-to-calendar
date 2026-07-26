@@ -691,6 +691,27 @@ function validateEventResponse(response) {
     });
 }
 
+// Repair model output where endTime is not after startTime — mirrors
+// supabase/functions/_shared/parse-event-response.ts. The common cause is
+// an event crossing midnight (a 23:12 receipt + default 1h duration →
+// 00:12 emitted on the SAME date). Rolling endTime forward one day
+// restores the intended duration; anything still nonsensical falls back
+// to a 1-hour event. Wall-clock math is anchored in UTC ("Z") so the
+// browser timezone and DST can never skew it.
+function normalizeEventTimes(details) {
+    const DAY_MS = 24 * 60 * 60 * 1000;
+    const HOUR_MS = 60 * 60 * 1000;
+    const start = new Date(`${details.startTime}Z`).getTime();
+    const end = new Date(`${details.endTime}Z`).getTime();
+    if (end > start) return;
+
+    // Midnight crossing needs a strictly earlier end — an EQUAL end is a
+    // zero-length event, which becomes 1 hour, not 24.
+    const endNextDay = end + DAY_MS;
+    const repaired = end < start && endNextDay > start ? endNextDay : start + HOUR_MS;
+    details.endTime = new Date(repaired).toISOString().slice(0, 19);
+}
+
 // Validate single event details
 function validateSingleEventDetails(details, index = 0) {
     const required = ['title', 'startTime', 'endTime'];
@@ -705,6 +726,9 @@ function validateSingleEventDetails(details, index = 0) {
     if (!dateTimeRegex.test(details.startTime) || !dateTimeRegex.test(details.endTime)) {
         throw new Error(`Event ${index + 1}: Invalid datetime format`);
     }
+
+    // Auto-repair midnight-crossing/zero-length events before rejecting
+    normalizeEventTimes(details);
 
     // Ensure start time is before end time
     if (new Date(details.startTime) >= new Date(details.endTime)) {

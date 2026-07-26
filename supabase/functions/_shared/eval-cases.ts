@@ -157,6 +157,35 @@ Mastercard
     },
   },
   {
+    // 2026-07-27 production report (BYOK): a 23:12 receipt made the model
+    // emit endTime 00:12 on the SAME day; the start<end validator then
+    // failed the whole extraction. parseEventResponse now repairs
+    // midnight-crossing times — this case pins the late-night receipt
+    // end-to-end.
+    name: "uber-eats-receipt-jp-late-night",
+    text: `決済内容
+店舗名
+Ｕｂｅｒ　Ｅａｔｓ　Ｊａｐａｎ　Ｉｎｃ．
+決済金額
+￥1,758
+　└ クレジット
+　￥1,758
+メルカード還元
+P17（付与予定）
+決済方法
+メルカード
+決済日時
+2026/07/26 23:12
+取引番号
+014420223480`,
+    expect: {
+      minEvents: 1,
+      maxEvents: 1,
+      startTime: "2026-07-26T23:12:00",
+      titleIncludes: ["uber", "1,758", "1758", "メルカード"],
+    },
+  },
+  {
     name: "simple-meeting-en-relative",
     text: "Team meeting tomorrow at 2pm in Conference Room A",
     expect: {

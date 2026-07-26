@@ -31,6 +31,7 @@ export const LLM_CONFIG = {
     ANY text containing a date or time has an event to extract. Besides appointments and meetings, this includes dated records such as purchase receipts, card transactions, reservations, deliveries, and deadlines: create an event at the recorded date/time and summarize the record in the title and description (e.g. store name and amount for a receipt).
     Keep the title short and human-readable, in the same language as the text.
     If no specific time is mentioned, assume 10:00 AM. If no duration is implied, use 1 hour.
+    endTime must be strictly AFTER startTime — when an event crosses midnight (e.g. starts 23:12), endTime uses the NEXT day's date.
     If the text contains multiple events or dated records, extract ALL of them as separate objects in the array.
     If only one event is found, still return it inside the events array.
     Return {"events": []} ONLY when the text contains no date or time information at all.

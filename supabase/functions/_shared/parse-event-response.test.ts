@@ -82,15 +82,53 @@ Deno.test("throws on invalid datetime format", () => {
   );
 });
 
-Deno.test("throws when start time is not before end time", () => {
+// Inverted times are REPAIRED, not rejected — a hard error here used to
+// fail the entire extraction (2026-07-27 production report: a 23:12
+// receipt + default 1h duration → model emitted end 00:12 on the same day).
+
+Deno.test("repairs midnight-crossing endTime by rolling it to the next day", () => {
+  const bad = {
+    ...VALID_EVENT,
+    startTime: "2026-07-26T23:12:00",
+    endTime: "2026-07-26T00:12:00",
+  };
+  const { events } = parseEventResponse(JSON.stringify({ events: [bad] }));
+  assertEquals(events[0].startTime, "2026-07-26T23:12:00");
+  assertEquals(events[0].endTime, "2026-07-27T00:12:00");
+});
+
+Deno.test("repairs inverted same-day times as an overnight event", () => {
   const bad = {
     ...VALID_EVENT,
     startTime: "2026-07-05T15:00:00",
     endTime: "2026-07-05T14:00:00",
   };
-  assertThrows(
-    () => parseEventResponse(JSON.stringify({ events: [bad] })),
-    Error,
-    "Event 1: Start time must be before end time",
-  );
+  const { events } = parseEventResponse(JSON.stringify({ events: [bad] }));
+  assertEquals(events[0].endTime, "2026-07-06T14:00:00");
+});
+
+Deno.test("repairs zero-length events to one hour", () => {
+  const bad = {
+    ...VALID_EVENT,
+    startTime: "2026-07-05T14:00:00",
+    endTime: "2026-07-05T14:00:00",
+  };
+  const { events } = parseEventResponse(JSON.stringify({ events: [bad] }));
+  assertEquals(events[0].endTime, "2026-07-05T15:00:00");
+});
+
+Deno.test("repairs endTime more than a day before startTime to one hour", () => {
+  const bad = {
+    ...VALID_EVENT,
+    startTime: "2026-07-10T10:00:00",
+    endTime: "2026-07-08T10:00:00",
+  };
+  const { events } = parseEventResponse(JSON.stringify({ events: [bad] }));
+  assertEquals(events[0].endTime, "2026-07-10T11:00:00");
+});
+
+Deno.test("leaves valid time ranges untouched", () => {
+  const { events } = parseEventResponse(JSON.stringify({ events: [VALID_EVENT] }));
+  assertEquals(events[0].startTime, VALID_EVENT.startTime);
+  assertEquals(events[0].endTime, VALID_EVENT.endTime);
 });

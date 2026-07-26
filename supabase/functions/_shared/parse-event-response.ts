@@ -69,6 +69,42 @@ export function parseEventResponse(
   return { events };
 }
 
+const DAY_MS = 24 * 60 * 60 * 1000;
+const HOUR_MS = 60 * 60 * 1000;
+
+/** Wall-clock arithmetic on timezone-less "YYYY-MM-DDTHH:mm:ss" strings —
+ * anchored in UTC so runtime timezone and DST can never skew the math. */
+function wallClockMs(dateTime: string): number {
+  return new Date(`${dateTime}Z`).getTime();
+}
+
+function toWallClockString(ms: number): string {
+  return new Date(ms).toISOString().slice(0, 19);
+}
+
+/**
+ * Repair model output where endTime is not after startTime. The common
+ * cause is an event crossing midnight (a 23:12 receipt + default 1h
+ * duration → 00:12 emitted on the SAME date). Rolling endTime forward one
+ * day restores the intended duration; anything still nonsensical falls
+ * back to a 1-hour event. Repairing beats rejecting: a hard validation
+ * error here used to fail the entire extraction.
+ */
+function normalizeEventTimes(details: EventDetails) {
+  const start = wallClockMs(details.startTime);
+  const end = wallClockMs(details.endTime);
+  if (end > start) return;
+
+  // Midnight crossing needs a strictly earlier end — an EQUAL end is a
+  // zero-length event, which becomes 1 hour, not 24.
+  const endNextDay = end + DAY_MS;
+  if (end < start && endNextDay > start) {
+    details.endTime = toWallClockString(endNextDay);
+  } else {
+    details.endTime = toWallClockString(start + HOUR_MS);
+  }
+}
+
 function validateSingleEventDetails(details: EventDetails, index: number) {
   const required = ["title", "startTime", "endTime"] as const;
   const missing = required.filter((field) => !details?.[field]);
@@ -85,6 +121,8 @@ function validateSingleEventDetails(details: EventDetails, index: number) {
   ) {
     throw new Error(`Event ${index + 1}: Invalid datetime format`);
   }
+
+  normalizeEventTimes(details);
 
   if (new Date(details.startTime) >= new Date(details.endTime)) {
     throw new Error(`Event ${index + 1}: Start time must be before end time`);
