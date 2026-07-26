@@ -110,6 +110,36 @@ export async function checkAndIncrementUsage(
 }
 
 /**
+ * Read the current month's usage WITHOUT incrementing — for clients that
+ * want to show remaining credits before the first extraction.
+ * A user with no row this month has used 0.
+ */
+export async function getUsage(
+  admin: UsageTrackingClient,
+  userId: string,
+): Promise<UsageInfo> {
+  const yearMonth = currentYearMonth();
+
+  const { data: existingUsage, error: fetchError } = await admin
+    .from("usage_tracking")
+    .select("usage_count")
+    .eq("user_id", userId)
+    .eq("year_month", yearMonth)
+    .single();
+
+  if (fetchError && fetchError.code !== "PGRST116") { // PGRST116 = not found
+    console.error("Error fetching usage:", fetchError);
+    throw new Error("Failed to read usage");
+  }
+
+  return {
+    usageCount: existingUsage?.usage_count || 0,
+    limit: MONTHLY_LIMIT,
+    yearMonth,
+  };
+}
+
+/**
  * Refund one usage after a request that was charged but failed.
  * Best-effort: never throws, so it cannot mask the original error.
  */

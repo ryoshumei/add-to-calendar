@@ -5,6 +5,7 @@ import {
 } from "https://deno.land/std@0.168.0/testing/asserts.ts";
 import {
   checkAndIncrementUsage,
+  getUsage,
   MONTHLY_LIMIT,
   refundUsage,
 } from "./usage-tracking.ts";
@@ -192,4 +193,38 @@ Deno.test("checkAndIncrementUsage surfaces unexpected fetch errors", async () =>
     Error,
     "Failed to check usage limit",
   );
+});
+
+Deno.test("getUsage returns the stored count without writing", async () => {
+  const { admin, calls } = fakeAdmin({
+    selectResult: { data: { usage_count: 13 }, error: null },
+  });
+
+  const usage = await getUsage(admin, "user-1");
+
+  assertEquals(usage.usageCount, 13);
+  assertEquals(usage.limit, MONTHLY_LIMIT);
+  assertMatch(usage.yearMonth, /^\d{4}-\d{2}$/);
+  assertEquals(calls.upserts.length, 0);
+  assertEquals(calls.updates.length, 0);
+});
+
+Deno.test("getUsage returns zero when the user has no row this month", async () => {
+  const { admin, calls } = fakeAdmin({
+    selectResult: { data: null, error: { code: "PGRST116" } },
+  });
+
+  const usage = await getUsage(admin, "user-1");
+
+  assertEquals(usage.usageCount, 0);
+  assertEquals(calls.upserts.length, 0);
+  assertEquals(calls.updates.length, 0);
+});
+
+Deno.test("getUsage surfaces unexpected fetch errors", async () => {
+  const { admin } = fakeAdmin({
+    selectResult: { data: null, error: { code: "500", message: "db down" } },
+  });
+
+  await assertRejects(() => getUsage(admin, "user-1"), Error, "Failed to read usage");
 });
