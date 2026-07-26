@@ -9,6 +9,7 @@ import type { UsageInfo, UsageTrackingClient } from '../_shared/usage-tracking.t
 import { ApiError, mapOpenAIError } from '../_shared/api-error.ts'
 import { parseEventResponse } from '../_shared/parse-event-response.ts'
 import type { EventResponse } from '../_shared/parse-event-response.ts'
+import { resolveCurrentDateTime } from '../_shared/client-datetime.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -80,8 +81,10 @@ serve(async (req) => {
     chargedUsage = usageInfo
     chargedUserId = user.id
 
-    // Get request body
-    const { image } = await req.json()
+    // Get request body. currentDateTime is the CLIENT's local time string —
+    // relative dates ("tomorrow") must resolve in the user's timezone, not
+    // this server's (UTC). Optional: old clients don't send it.
+    const { image, currentDateTime } = await req.json()
     if (!image || typeof image !== 'string') {
       throw new Error('image is required')
     }
@@ -93,7 +96,11 @@ serve(async (req) => {
     }
 
     // Process with OpenAI vision
-    const eventDetails = await processImageWithOpenAI(image, openaiApiKey)
+    const eventDetails = await processImageWithOpenAI(
+      image,
+      openaiApiKey,
+      resolveCurrentDateTime(currentDateTime)
+    )
 
     return new Response(
       JSON.stringify({
@@ -135,10 +142,11 @@ serve(async (req) => {
 /**
  * Process an image with the OpenAI vision API to extract event details.
  */
-async function processImageWithOpenAI(imageDataUrl: string, apiKey: string): Promise<EventResponse> {
-  const now = new Date()
-  const currentDateTime = now.toLocaleString()
-
+async function processImageWithOpenAI(
+  imageDataUrl: string,
+  apiKey: string,
+  currentDateTime: string
+): Promise<EventResponse> {
   try {
     const response = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',

@@ -491,7 +491,10 @@ async function processWithBackend(text, accessToken) {
                 'Authorization': `Bearer ${accessToken}`,
                 'X-Extension-Version': manifest.version,
             },
-            body: JSON.stringify({ selectedText: text })
+            // currentDateTime: the browser's local time (with timezone) so
+            // relative dates ("tomorrow") resolve against the user's clock,
+            // not the Edge Function's UTC clock.
+            body: JSON.stringify({ selectedText: text, currentDateTime: new Date().toString() })
         });
 
         // Check for auth errors
