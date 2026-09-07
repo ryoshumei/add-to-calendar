@@ -407,5 +407,22 @@ test.describe('Configuration Management', () => {
       expect(resolved.processTextUrl).toBe(resolved.configuredProcessTextUrl);
       expect(resolved.processTextUrl).toMatch(/^https:\/\/[a-z0-9]+\.supabase\.co\//);
     });
+
+    test('should send the own-key path to OpenAI when no override is stored', async ({
+      context,
+    }) => {
+      const [serviceWorker] = context.serviceWorkers();
+
+      const resolved = await serviceWorker.evaluate(async () => ({
+        storedOverride: await getBackendBaseUrlOverride(),
+        openAiUrl: await resolveOpenAiUrl(),
+      }));
+
+      // The override reaches OpenAI as well as the backend, so this is the
+      // check that it stays inert for a real install: a user's own key must
+      // never post their Source anywhere but OpenAI.
+      expect(resolved.storedOverride).toBeNull();
+      expect(resolved.openAiUrl).toBe('https://api.openai.com/v1/chat/completions');
+    });
   });
 });

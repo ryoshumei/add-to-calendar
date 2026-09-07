@@ -9,55 +9,15 @@
 // it is replaced with a known image. Everything downstream — pipeline,
 // request, modal, usage — is what ships. The real capture is a manual check
 // before release.
-import { test, expect, openPopup } from './fixtures/extension-fixtures.js';
+import {
+  test,
+  expect,
+  openPopup,
+  standInForCapture,
+  captureFromPopup,
+} from './fixtures/extension-fixtures.js';
 
 const PROCESS_IMAGE_PATH = '/functions/v1/process-image';
-
-// Draws a capture-sized image in the page and hands it to the service worker
-// as the tab capture the next trigger will see.
-async function standInForCapture(context, page, { width = 1200, height = 800 } = {}) {
-  const captureDataUrl = await page.evaluate(
-    ({ width, height }) => {
-      const canvas = document.createElement('canvas');
-      canvas.width = width;
-      canvas.height = height;
-      const ctx = canvas.getContext('2d');
-      const gradient = ctx.createLinearGradient(0, 0, width, height);
-      gradient.addColorStop(0, '#ff0000');
-      gradient.addColorStop(1, '#0000ff');
-      ctx.fillStyle = gradient;
-      ctx.fillRect(0, 0, width, height);
-      return canvas.toDataURL('image/png');
-    },
-    { width, height }
-  );
-
-  const [serviceWorker] = context.serviceWorkers();
-  await serviceWorker.evaluate((dataUrl) => {
-    self.captureVisibleTab = async () => dataUrl;
-  }, captureDataUrl);
-
-  return captureDataUrl;
-}
-
-// The capture button is in the popup's static HTML, but its click handler and
-// the storage listener behind the usage bar are attached only after an async
-// start-up. Driving the popup before that finishes loses the click or the
-// usage update, so wait until start-up has painted the auth UI.
-async function waitForPopupReady(popupPage) {
-  await popupPage.waitForFunction(
-    () => document.getElementById('loginSection').style.display !== ''
-  );
-}
-
-// Clicks "Capture screenshot" in the popup. The popup is a tab here, so the
-// page under Extraction has to be the front tab for the service worker to
-// resolve it the way it resolves the page under a real popup.
-async function captureFromPopup(popupPage, sourcePage) {
-  await sourcePage.bringToFront();
-  await waitForPopupReady(popupPage);
-  await popupPage.locator('#captureScreenshotBtn').click();
-}
 
 test.describe('Screenshot Extraction (stub backend)', () => {
   test('the Screenshot is posted to the stub and its Event reaches the modal', async ({
