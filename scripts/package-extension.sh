@@ -45,6 +45,7 @@ zip -r "$OUTPUT_FILE" \
     content.js \
     config.js \
     popup/ \
+    scripts/backend-config.js \
     scripts/supabase-client.js \
     scripts/calendar-service.js \
     scripts/llm-prompt.js \

@@ -2,6 +2,7 @@
 
 // Import configuration and services
 importScripts('config.js');
+importScripts('scripts/backend-config.js');
 importScripts('scripts/supabase-js.min.js'); // Supabase JavaScript client library
 importScripts('scripts/supabase-client.js');
 importScripts('scripts/calendar-service.js');
@@ -183,7 +184,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 let activeRequests = new Set();
 
 // Handle context menu click events
-chrome.contextMenus.onClicked.addListener(async (info, tab) => {
+chrome.contextMenus.onClicked.addListener((info, tab) => handleContextMenuClick(info, tab));
+
+async function handleContextMenuClick(info, tab) {
     if (info.menuItemId === "addToCalendar") {
         // Generate a unique request ID using timestamp
         const requestId = `${tab.id}-${Date.now()}`;
@@ -377,7 +380,7 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
             activeRequests.delete(tab.id);
         }
     }
-});
+}
 
 // Helper functions for status messages
 async function sendStatusMessage(tabId, message, detail = '') {
@@ -484,7 +487,9 @@ async function processWithBackend(text, accessToken) {
         // Get extension version from manifest
         const manifest = chrome.runtime.getManifest();
 
-        const response = await fetch(CONFIG.EDGE_FUNCTIONS.PROCESS_TEXT, {
+        const endpoint = await resolveBackendUrl(CONFIG.EDGE_FUNCTIONS.PROCESS_TEXT);
+
+        const response = await fetch(endpoint, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',

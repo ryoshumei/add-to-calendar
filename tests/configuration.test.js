@@ -388,4 +388,24 @@ test.describe('Configuration Management', () => {
       expect(popupConfig.extensionName).toBe(serviceWorkerConfig.extensionName);
     });
   });
+
+  test.describe('Backend URL Resolution', () => {
+    test('should use the production backend when no override is stored', async ({ context }) => {
+      const [serviceWorker] = context.serviceWorkers();
+
+      const resolved = await serviceWorker.evaluate(async () => ({
+        storedOverride: await getBackendBaseUrlOverride(),
+        supabaseUrl: await resolveSupabaseUrl(),
+        processTextUrl: await resolveBackendUrl(CONFIG.EDGE_FUNCTIONS.PROCESS_TEXT),
+        configuredSupabaseUrl: CONFIG.SUPABASE_URL,
+        configuredProcessTextUrl: CONFIG.EDGE_FUNCTIONS.PROCESS_TEXT
+      }));
+
+      // Nothing stored: every real install resolves to the production project.
+      expect(resolved.storedOverride).toBeNull();
+      expect(resolved.supabaseUrl).toBe(resolved.configuredSupabaseUrl);
+      expect(resolved.processTextUrl).toBe(resolved.configuredProcessTextUrl);
+      expect(resolved.processTextUrl).toMatch(/^https:\/\/[a-z0-9]+\.supabase\.co\//);
+    });
+  });
 });
