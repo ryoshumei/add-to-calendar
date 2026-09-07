@@ -24,6 +24,7 @@ function loadBackendConfig() {
 
 const sampleText = 'Team meeting tomorrow at 2pm in Room 301';
 const sampleDateTime = '3/2/2026, 10:00:00 AM';
+const sampleImageDataUrl = 'data:image/jpeg;base64,QUJD';
 
 test.describe('LLM Prompt Sync (client ↔ backend)', () => {
   test('should produce identical system prompts', async ({ context }) => {
@@ -63,6 +64,24 @@ test.describe('LLM Prompt Sync (client ↔ backend)', () => {
     const backendBody = backendConfig.buildRequestBody(sampleText, sampleDateTime);
 
     expect(clientBody).toEqual(backendBody);
+  });
+
+  test('should produce byte-identical image request bodies', async ({ context }) => {
+    const [serviceWorker] = context.serviceWorkers();
+
+    // Stringify inside the service worker so key order is compared too:
+    // a reordered mirror is drift, even if the objects are deep-equal.
+    const clientJson = await serviceWorker.evaluate(({ url, dt }) => {
+      return JSON.stringify(LLM_CONFIG.buildImageRequestBody(url, dt));
+    }, { url: sampleImageDataUrl, dt: sampleDateTime });
+
+    const backendConfig = loadBackendConfig();
+    const backendJson = JSON.stringify(
+      backendConfig.buildImageRequestBody(sampleImageDataUrl, sampleDateTime)
+    );
+
+    expect(JSON.parse(clientJson)).toEqual(JSON.parse(backendJson));
+    expect(clientJson).toBe(backendJson);
   });
 
   test('should use the same model and parameters', async ({ context }) => {
