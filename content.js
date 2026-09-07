@@ -511,6 +511,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         showAuthErrorModal(message.message);
     } else if (message.type === "SHOW_SETUP_REQUIRED") {
         showSetupRequiredModal();
+    } else if (message.type === "SHOW_EXTRACTION_ERROR") {
+        showExtractionErrorModal(message.message);
     }
 });
 
@@ -660,6 +662,52 @@ function showAuthErrorModal(errorMessage = 'Authentication failed') {
         }
     });
     
+    // Auto-remove after 20 seconds
+    setTimeout(() => {
+        if (modal.parentElement) {
+            modal.remove();
+        }
+    }, 20000);
+}
+
+// Show a failed Extraction. A Screenshot has no basic fallback, so the user
+// gets the reason — a monthly limit, a backend failure — instead of an
+// invented event.
+function showExtractionErrorModal(errorMessage = 'Something went wrong') {
+    hideStatusModal();
+    const existingModal = document.querySelector('.calendar-modal-overlay');
+    if (existingModal) {
+        existingModal.remove();
+    }
+
+    const modal = document.createElement('div');
+    modal.className = 'calendar-modal-overlay';
+
+    modal.innerHTML = `
+        <div class="status-modal error extraction-error">
+            <h3>⚠️ Could not create events</h3>
+            <div class="error-message"></div>
+            <div style="margin-top: 15px;">
+                <button class="secondary">Close</button>
+            </div>
+        </div>
+    `;
+
+    // The message comes from the backend, so it is attached as text.
+    modal.querySelector('.error-message').textContent = errorMessage;
+
+    document.body.appendChild(modal);
+
+    modal.querySelector('button.secondary').addEventListener('click', () => {
+        modal.remove();
+    });
+
+    modal.addEventListener('click', (e) => {
+        if (e.target === modal) {
+            modal.remove();
+        }
+    });
+
     // Auto-remove after 20 seconds
     setTimeout(() => {
         if (modal.parentElement) {

@@ -73,6 +73,24 @@ test.describe('Selection Extraction (stub backend)', () => {
     expect(post.headers['x-extension-version']).toBe(manifestVersion);
   });
 
+  // The Screenshot path reports a session expiry in the same words, through
+  // the same mapping — this pins the wording the Selection flow shows.
+  test('an expired session shows the auth modal', async ({
+    context,
+    stubBackend,
+    sourcePage,
+    signedIn,
+  }) => {
+    stubBackend.textResponse = { status: 401, body: { error: 'Invalid JWT' } };
+
+    await selectText(sourcePage, '#selection-source');
+    await extractFromSelection(context, sourcePage);
+
+    const authModal = sourcePage.locator('.calendar-modal-overlay .status-modal.error');
+    await expect(authModal).toContainText('Session expired. Please sign in again with Google.');
+    await expect(sourcePage.locator('.calendar-modal-overlay .event-card')).toHaveCount(0);
+  });
+
   test('the popup usage bar reflects the usage the stub returned', async ({
     context,
     extensionId,

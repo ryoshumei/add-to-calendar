@@ -136,4 +136,78 @@ test.describe('Screenshot Extraction (stub backend)', () => {
     await expect(card).toHaveCount(1);
     expect(stubBackend.requestsTo(PROCESS_IMAGE_PATH, 'POST')).toHaveLength(1);
   });
+
+  test('an expired session shows the message the Selection flow shows', async ({
+    context,
+    extensionId,
+    stubBackend,
+    sourcePage,
+    signedIn,
+  }) => {
+    stubBackend.imageResponse = { status: 401, body: { error: 'Invalid JWT' } };
+    await standInForCapture(context, sourcePage);
+    const popupPage = await openPopup(context, extensionId);
+
+    await captureFromPopup(popupPage, sourcePage);
+
+    const authModal = sourcePage.locator('.calendar-modal-overlay .status-modal.error');
+    await expect(authModal).toContainText('Session expired. Please sign in again with Google.');
+    await expect(authModal.locator('.signin-button')).toBeVisible();
+    await expect(sourcePage.locator('.calendar-modal-overlay .event-card')).toHaveCount(0);
+  });
+
+  test('a monthly limit shows the backend message, with no basic fallback event', async ({
+    context,
+    extensionId,
+    stubBackend,
+    sourcePage,
+    signedIn,
+  }) => {
+    const limitMessage = 'Monthly limit exceeded (50/50). Resets on 2026-04-01.';
+    stubBackend.imageResponse = { status: 429, body: { error: limitMessage } };
+    await standInForCapture(context, sourcePage);
+    const popupPage = await openPopup(context, extensionId);
+
+    await captureFromPopup(popupPage, sourcePage);
+
+    await expect(sourcePage.locator('.calendar-modal-overlay .extraction-error')).toContainText(
+      limitMessage
+    );
+    await expect(sourcePage.locator('.calendar-modal-overlay .event-card')).toHaveCount(0);
+  });
+
+  test('a page Chrome will not capture is reported in the popup', async ({
+    context,
+    extensionId,
+    stubBackend,
+    sourcePage,
+    signedIn,
+  }) => {
+    // No stand-in here: the real chrome.tabs.captureVisibleTab refuses this
+    // page for the same reason it refuses a browser-internal one — the
+    // extension is not allowed to capture it.
+    const popupPage = await openPopup(context, extensionId);
+
+    await captureFromPopup(popupPage, sourcePage);
+
+    await expect(popupPage.locator('#message')).toContainText('cannot be captured');
+    expect(stubBackend.requestsTo(PROCESS_IMAGE_PATH, 'POST')).toHaveLength(0);
+  });
+
+  test('with no session the trigger shows the setup guidance', async ({
+    context,
+    extensionId,
+    stubBackend,
+    sourcePage,
+  }) => {
+    await standInForCapture(context, sourcePage);
+    const popupPage = await openPopup(context, extensionId);
+
+    await captureFromPopup(popupPage, sourcePage);
+
+    await expect(sourcePage.locator('.calendar-modal-overlay .status-modal.error h3')).toContainText(
+      'Setup Required'
+    );
+    expect(stubBackend.requestsTo(PROCESS_IMAGE_PATH, 'POST')).toHaveLength(0);
+  });
 });

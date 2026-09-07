@@ -115,6 +115,10 @@ async function startStubBackend() {
     // Holds the Edge Function answers back, so a test can act while an
     // Extraction is still in flight.
     responseDelayMs: 0,
+    // Set either to { status, body } to make that endpoint fail instead of
+    // returning the canned Events.
+    textResponse: null,
+    imageResponse: null,
     requestsTo(pathname, method) {
       return requests.filter(
         (request) =>
@@ -167,11 +171,19 @@ async function startStubBackend() {
       }
 
       if (url.pathname === '/functions/v1/process-text') {
+        if (stub.textResponse) {
+          json(stub.textResponse.status, stub.textResponse.body);
+          return;
+        }
         json(200, { eventDetails: { events: stub.events }, usage: stub.usage });
         return;
       }
 
       if (url.pathname === '/functions/v1/process-image') {
+        if (stub.imageResponse) {
+          json(stub.imageResponse.status, stub.imageResponse.body);
+          return;
+        }
         json(200, { eventDetails: { events: stub.events }, usage: stub.usage });
         return;
       }
