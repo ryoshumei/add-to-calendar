@@ -124,6 +124,12 @@ npm install:browsers       # Install Playwright browsers
 npm install:deps          # Install browser system dependencies
 ```
 
+### Backend unit tests (Deno)
+```bash
+npm run test:backend       # deno test supabase/functions/_shared/ — needs no permission flags
+```
+Keep these permission-free: anything that must touch the filesystem belongs in the Playwright suite, so the obvious flagless `deno test` command stays green.
+
 ### Test Organization
 - `tests/*.test.js`: Test suites (extension-loading, popup-ui, context-menu, calendar-integration, etc.)
 - `tests/fixtures/`: Reusable test fixtures (extension-fixtures.js provides context, extensionId, popupPage, testPage)
@@ -156,7 +162,8 @@ OPENAI_API_KEY=sk-... npm run eval:screenshot
 - Needs `npm ci` and `npx playwright install chromium`; Japanese fixtures need CJK fonts on the machine
 - Skipped without `OPENAI_API_KEY`; never runs in CI (live API, costs money, nondeterministic)
 - **Run before deploying any change to the LLM prompt or model**, alongside `eval:prompt` — a full run is 6 vision calls, well under $0.01 on gpt-4.1-mini
-- Case metadata (fixtures exist, both languages per category, nothing binary committed) is checked in the regular Deno suite (`eval-screenshot-cases.test.ts`); that the fixtures still render to a non-blank PNG is checked in the Playwright suite (`tests/eval-screenshot-render.test.js`)
+- Rendered Screenshots land in `test-results/screenshot-eval/` (gitignored, replaced each run) so a failing case can be eyeballed
+- Case metadata (both languages per category, one job per case) is checked in the Deno suite (`eval-screenshot-cases.test.ts`); the fixture directory (declared files present, nothing binary committed) and a non-blank render are checked in the Playwright suite (`tests/eval-screenshot-render.test.js`)
 - The judge tier (Tier 2) stays text-only
 
 ### Debugging

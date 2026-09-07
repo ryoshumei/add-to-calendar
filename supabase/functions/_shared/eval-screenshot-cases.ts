@@ -20,28 +20,28 @@ export interface ScreenshotEvalCase {
   fixture: string;
   lang: "en" | "ja";
   category: ScreenshotCategory;
-  /** Viewport used for the render; the Screenshot is the full page. */
-  viewport?: { width: number; height: number };
   expect: EvalExpectation;
 }
 
-const DEFAULT_VIEWPORT = { width: 900, height: 800 };
-
-/** Absolute path of a case's HTML fixture. */
+/**
+ * Absolute path of a case's HTML fixture. Building the string needs no read
+ * permission — only the renderer and the eval actually open the file.
+ */
 export function screenshotFixturePath(evalCase: ScreenshotEvalCase): string {
   const url = new URL(`./eval-screenshots/${evalCase.fixture}`, import.meta.url);
   return decodeURIComponent(url.pathname);
 }
 
-/** Render jobs for scripts/render-eval-screenshots.js. */
+/**
+ * Render jobs for scripts/render-eval-screenshots.js, which owns the viewport
+ * (the Screenshot is the full page, so tall fixtures are not cut off).
+ */
 export function screenshotRenderJobs(
   cases: ScreenshotEvalCase[] = SCREENSHOT_EVAL_CASES,
-): Array<{ name: string; html: string; width: number; height: number }> {
+): Array<{ name: string; html: string }> {
   return cases.map((evalCase) => ({
     name: evalCase.name,
     html: screenshotFixturePath(evalCase),
-    width: (evalCase.viewport ?? DEFAULT_VIEWPORT).width,
-    height: (evalCase.viewport ?? DEFAULT_VIEWPORT).height,
   }));
 }
 

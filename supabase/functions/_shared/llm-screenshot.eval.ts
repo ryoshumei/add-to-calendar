@@ -10,6 +10,10 @@
 // LLM_CONFIG.buildImageRequestBody → chat/completions → parseEventResponse,
 // matched with the same events matcher the text tier uses.
 // Cases are skipped (ignored) when OPENAI_API_KEY is not set.
+//
+// The rendered PNG goes to the model as-is: this tier measures the prompt and
+// the parser, not the extension's capture step (crop to the Region, downscale
+// to 1600 px, JPEG 0.7), which is covered by the Screenshot pipeline tests.
 
 import { encode as base64Encode } from "https://deno.land/std@0.168.0/encoding/base64.ts";
 import { LLM_CONFIG } from "./llm-prompt.ts";
@@ -42,7 +46,13 @@ function renderedScreenshots(): Promise<Map<string, string>> {
 }
 
 async function renderAll(): Promise<Map<string, string>> {
-  const outDir = await Deno.makeTempDir({ prefix: "screenshot-eval-" });
+  // One fixed, gitignored directory rather than a fresh temp dir: each run
+  // replaces the last, and the Screenshots stay around for inspection when a
+  // case fails, instead of piling up in /tmp.
+  const outDir = `${repoRoot}test-results/screenshot-eval`;
+  await Deno.remove(outDir, { recursive: true }).catch((error) => {
+    if (!(error instanceof Deno.errors.NotFound)) throw error;
+  });
   const payload = JSON.stringify({ outDir, jobs: screenshotRenderJobs() });
 
   const child = new Deno.Command("node", {
