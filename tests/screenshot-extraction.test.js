@@ -14,25 +14,13 @@ import {
   expect,
   openPopup,
   standInForCapture,
-  triggerCapture,
-  drawRegion,
+  captureFromPopup,
   imageSize,
+  DEFAULT_REGION,
 } from './fixtures/extension-fixtures.js';
 
 const PROCESS_IMAGE_PATH = '/functions/v1/process-image';
 const OVERLAY = '#calendar-region-overlay';
-
-// Big enough to be a Region rather than a mis-click, small enough to fit any
-// window the suite runs in.
-const A_REGION = { x: 60, y: 40, width: 320, height: 180 };
-
-// Runs the whole trigger: the popup opens the overlay on the page, and the
-// user drags a Region on it.
-async function captureRegion(popupPage, sourcePage, region = A_REGION) {
-  await triggerCapture(popupPage, sourcePage);
-  await expect(sourcePage.locator(OVERLAY)).toBeVisible();
-  await drawRegion(sourcePage, region);
-}
 
 test.describe('Screenshot Extraction (stub backend)', () => {
   test('the Screenshot is posted to the stub and its Event reaches the modal', async ({
@@ -49,7 +37,7 @@ test.describe('Screenshot Extraction (stub backend)', () => {
     await standInForCapture(context, sourcePage, { width: 2400, height: 1200 });
     const popupPage = await openPopup(context, extensionId);
 
-    await captureRegion(popupPage, sourcePage);
+    await captureFromPopup(popupPage, sourcePage);
 
     const card = sourcePage.locator('.calendar-modal-overlay .event-card');
     await expect(card).toHaveCount(1);
@@ -74,7 +62,7 @@ test.describe('Screenshot Extraction (stub backend)', () => {
     await standInForCapture(context, sourcePage);
     const popupPage = await openPopup(context, extensionId);
 
-    await captureRegion(popupPage, sourcePage, A_REGION);
+    await captureFromPopup(popupPage, sourcePage, DEFAULT_REGION);
 
     await expect(sourcePage.locator('.calendar-modal-overlay .event-card')).toHaveCount(1);
     const [post] = stubBackend.requestsTo(PROCESS_IMAGE_PATH, 'POST');
@@ -83,8 +71,8 @@ test.describe('Screenshot Extraction (stub backend)', () => {
     // The Region is drawn in CSS pixels and captured in device pixels, and at
     // this size the 1600 px cap never bites, so nothing is downscaled away.
     expect(await imageSize(sourcePage, post.body.image)).toEqual({
-      width: Math.round(A_REGION.width * devicePixelRatio),
-      height: Math.round(A_REGION.height * devicePixelRatio),
+      width: Math.round(DEFAULT_REGION.width * devicePixelRatio),
+      height: Math.round(DEFAULT_REGION.height * devicePixelRatio),
     });
   });
 
@@ -98,7 +86,7 @@ test.describe('Screenshot Extraction (stub backend)', () => {
     await standInForCapture(context, sourcePage);
     const popupPage = await openPopup(context, extensionId);
 
-    await captureRegion(popupPage, sourcePage);
+    await captureFromPopup(popupPage, sourcePage);
 
     const thumbnail = sourcePage.locator('.calendar-modal-overlay .screenshot-thumbnail');
     await expect(thumbnail).toBeVisible();
@@ -118,7 +106,7 @@ test.describe('Screenshot Extraction (stub backend)', () => {
     await standInForCapture(context, sourcePage);
     const popupPage = await openPopup(context, extensionId);
 
-    await captureRegion(popupPage, sourcePage);
+    await captureFromPopup(popupPage, sourcePage);
 
     // The usage is only stored once the Extraction comes back, and the whole
     // capture runs first, so the modal is the sign that it is worth reading.
@@ -146,7 +134,7 @@ test.describe('Screenshot Extraction (stub backend)', () => {
     await standInForCapture(context, sourcePage);
     const popupPage = await openPopup(context, extensionId);
 
-    await captureRegion(popupPage, sourcePage);
+    await captureFromPopup(popupPage, sourcePage);
     await popupPage.locator('#captureScreenshotBtn').click();
 
     // Not even an overlay to draw a second Region on.
@@ -167,7 +155,7 @@ test.describe('Screenshot Extraction (stub backend)', () => {
     await standInForCapture(context, sourcePage);
     const popupPage = await openPopup(context, extensionId);
 
-    await captureRegion(popupPage, sourcePage);
+    await captureFromPopup(popupPage, sourcePage);
 
     const authModal = sourcePage.locator('.calendar-modal-overlay .status-modal.error');
     await expect(authModal).toContainText('Session expired. Please sign in again with Google.');
@@ -187,7 +175,7 @@ test.describe('Screenshot Extraction (stub backend)', () => {
     await standInForCapture(context, sourcePage);
     const popupPage = await openPopup(context, extensionId);
 
-    await captureRegion(popupPage, sourcePage);
+    await captureFromPopup(popupPage, sourcePage);
 
     await expect(sourcePage.locator('.calendar-modal-overlay .extraction-error')).toContainText(
       limitMessage
@@ -206,7 +194,7 @@ test.describe('Screenshot Extraction (stub backend)', () => {
     await standInForCapture(context, sourcePage);
     const popupPage = await openPopup(context, extensionId);
 
-    await captureRegion(popupPage, sourcePage);
+    await captureFromPopup(popupPage, sourcePage);
 
     await expect(sourcePage.locator('.calendar-modal-overlay .no-events-message')).toContainText(
       'screenshot'
@@ -226,7 +214,7 @@ test.describe('Screenshot Extraction (stub backend)', () => {
     // the popup has closed, so the page is where the user is looking.
     const popupPage = await openPopup(context, extensionId);
 
-    await captureRegion(popupPage, sourcePage);
+    await captureFromPopup(popupPage, sourcePage);
 
     await expect(sourcePage.locator('.calendar-modal-overlay .extraction-error')).toContainText(
       'cannot be captured'
@@ -243,7 +231,7 @@ test.describe('Screenshot Extraction (stub backend)', () => {
     await standInForCapture(context, sourcePage);
     const popupPage = await openPopup(context, extensionId);
 
-    await captureRegion(popupPage, sourcePage);
+    await captureFromPopup(popupPage, sourcePage);
 
     await expect(sourcePage.locator('.calendar-modal-overlay .status-modal.error h3')).toContainText(
       'Setup Required'

@@ -131,17 +131,17 @@ npm run test:backend       # deno test supabase/functions/_shared/ — needs no 
 Keep these permission-free: anything that must touch the filesystem belongs in the Playwright suite, so the obvious flagless `deno test` command stays green.
 
 ### Test Organization
-- `tests/*.test.js`: Test suites — `configuration`, `llm-prompt`, `llm-prompt-sync`, `selection-extraction`, `screenshot-pipeline`, `region-overlay`, `screenshot-extraction`, `eval-screenshot-render`
-- `tests/fixtures/`: Reusable test fixtures (extension-fixtures.js provides context, extensionId, popupPage, testPage, stubBackend, sourcePage, signedIn, plus the helpers that drive a Selection, the popup trigger and a Region)
+- `tests/*.test.js`: Test suites — `configuration`, `llm-prompt`, `llm-prompt-sync`, `selection-extraction`, `screenshot-pipeline`, `region-overlay`, `screenshot-extraction`, `screenshot-key-path`, `eval-screenshot-render`
+- `tests/fixtures/`: Reusable test fixtures (extension-fixtures.js provides context, extensionId, popupPage, testPage, stubBackend, sourcePage, stubbedEndpoints, signedIn, ownKey, plus the helpers that drive a Selection, the popup trigger and a Region)
 - **Configuration**: playwright.config.js defines test settings, reporters (HTML, JSON, list)
 
 ### Stub-Backend Harness (end-to-end without the real backend)
 `tests/fixtures/stub-backend.js` runs a local HTTP server that answers the Supabase auth endpoint and the Edge Functions, records every request (headers and body), and serves the page a test drives a Selection from. It costs nothing and touches no network.
 
-- `stubBackend` fixture: starts/stops the server; `stub.events` and `stub.usage` are the canned answers for both `process-text` and `process-image`, `stub.requestsTo(pathname, method)` the assertions. `stub.textResponse` / `stub.imageResponse` (`{ status, body }`) make one endpoint fail instead; `stub.responseDelayMs` holds the Edge Function answers back so a test can act mid-Extraction
-- `signedIn` fixture: writes the stub's base URL to `backend_base_url_override` and a session to `supabase_session` in `chrome.storage.local`, then re-runs `initializeAuth()` so the service worker picks both up
-- `scripts/backend-config.js`: resolves those URLs. **With no override stored — every real install — the production URLs in config.js are used unchanged**; the extension never writes that key itself
-- Examples: `tests/selection-extraction.test.js` and `tests/screenshot-extraction.test.js` (trigger → backend request → confirmation modal → popup usage bar)
+- `stubBackend` fixture: starts/stops the server; `stub.events` and `stub.usage` are the canned answers for `process-text`, `process-image` and the OpenAI route alike, `stub.requestsTo(pathname, method)` the assertions. `stub.textResponse` / `stub.imageResponse` / `stub.openAiResponse` (`{ status, body }`) make one endpoint fail instead; `stub.openAiContent` hands the own-key path raw model output (fenced JSON, a single event object, empty) so normalisation can be driven; `stub.responseDelayMs` holds the Edge Function answers back so a test can act mid-Extraction
+- `stubbedEndpoints` fixture: writes the stub's base URL to `backend_base_url_override` in `chrome.storage.local`. `signedIn` builds on it with a session in `supabase_session` plus a re-run of `initializeAuth()`; `ownKey` builds on it with an OpenAI key in `chrome.storage.sync`, for the own-key path
+- `scripts/backend-config.js`: resolves those URLs — the Supabase auth endpoints, the Edge Functions and OpenAI's `/v1/chat/completions`. **With no override stored — every real install — the production URLs are used unchanged**; the extension never writes that key itself
+- Examples: `tests/selection-extraction.test.js` and `tests/screenshot-extraction.test.js` (trigger → backend request → confirmation modal → popup usage bar), `tests/screenshot-key-path.test.js` (trigger → OpenAI request → confirmation modal, with the backend never contacted)
 - `chrome.tabs.captureVisibleTab` needs the activeTab grant Chrome only gives on a real toolbar click, so a Screenshot test replaces the service worker's `captureVisibleTab` wrapper with a known image; the real capture is a manual check before release
 
 ### Prompt Evals (live LLM, opt-in)
@@ -199,6 +199,9 @@ OPENAI_API_KEY=sk-... npm run eval:screenshot
 - When limit reached: Returns clear error message, no fallback to basic processing
 - Usage info: Stored in `chrome.storage.local` and updated after each backend request
 - Visual indicator: Color-coded progress bar (green → yellow → orange → red as usage increases)
+
+### Extraction paths
+A Screenshot follows the same priority as a Selection (`background.js:handleScreenshotCapture`): the user's own OpenAI key first (`processImageWithOpenAI`, built by `LLM_CONFIG.buildImageRequestBody` — the Region never reaches the shared backend), the backend second (`processImageWithBackend`), and with neither a key nor a session, the setup-required modal. A Screenshot has no basic fallback: a failed Extraction is an error the user sees.
 
 ### Backend Service Integration
 **Implemented** (background.js:processWithBackend):

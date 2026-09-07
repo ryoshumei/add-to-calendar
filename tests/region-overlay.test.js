@@ -13,14 +13,12 @@ import {
   imageSize,
   triggerCapture,
   drawRegion,
+  captureFromPopup,
 } from './fixtures/extension-fixtures.js';
 
 const PROCESS_IMAGE_PATH = '/functions/v1/process-image';
 const OVERLAY = '#calendar-region-overlay';
 const REGION_RECT = `${OVERLAY} .region-rect`;
-
-// Big enough to be a Region rather than a mis-click.
-const A_REGION = { x: 60, y: 40, width: 320, height: 180 };
 
 // A stand-in capture small enough that the 1600 px cap never bites, so a
 // Screenshot of these dimensions is the whole visible tab and nothing less.
@@ -34,9 +32,7 @@ async function expectDismissedWithNothingCaptured(
 ) {
   await expect(sourcePage.locator(OVERLAY)).toHaveCount(0);
 
-  await triggerCapture(popupPage, sourcePage);
-  await expect(sourcePage.locator(OVERLAY)).toBeVisible();
-  await drawRegion(sourcePage, A_REGION);
+  await captureFromPopup(popupPage, sourcePage);
 
   await expect(sourcePage.locator('.calendar-modal-overlay .event-card')).toHaveCount(1);
   expect(await capturesTaken(context)).toBe(1);
@@ -225,9 +221,7 @@ test.describe('Region overlay', () => {
 
     // An earlier Extraction leaves its confirmation modal on the page, and it
     // would be in the next Screenshot as surely as the overlay would.
-    await triggerCapture(popupPage, sourcePage);
-    await expect(sourcePage.locator(OVERLAY)).toBeVisible();
-    await drawRegion(sourcePage, A_REGION);
+    await captureFromPopup(popupPage, sourcePage);
     await expect(sourcePage.locator('.calendar-modal-overlay .event-card')).toHaveCount(1);
 
     const capture = await holdTheCapture(context);

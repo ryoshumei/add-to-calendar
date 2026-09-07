@@ -426,10 +426,18 @@ async function handleScreenshotCapture(tab, region = null, devicePixelRatio = 1)
     activeRequests.add(tab.id);
 
     try {
-        if (!currentUser || !supabaseAuth?.isAuthenticated()) {
-            console.log('ℹ️ No session for a Screenshot — showing setup guidance');
+        // Priority identical to a Selection: the user's own OpenAI key first,
+        // the shared backend second, and with neither, setup guidance.
+        const { apiKey } = await chrome.storage.sync.get('apiKey');
+        const hasSession = Boolean(currentUser && supabaseAuth?.isAuthenticated());
+
+        if (!apiKey && !hasSession) {
+            console.log('ℹ️ No key and no session for a Screenshot — showing setup guidance');
             await showSetupRequired(tab.id);
-            return { success: false, error: 'Sign in with Google to send a Screenshot.' };
+            return {
+                success: false,
+                error: 'Sign in with Google or set your OpenAI API key to send a Screenshot.'
+            };
         }
 
         let capture;
@@ -445,7 +453,11 @@ async function handleScreenshotCapture(tab, region = null, devicePixelRatio = 1)
             return { success: false, error: CANNOT_CAPTURE_MESSAGE };
         }
 
-        await sendStatusMessage(tab.id, 'Reading this page...', 'This may take a few seconds');
+        await sendStatusMessage(
+            tab.id,
+            'Reading this page...',
+            apiKey ? 'Using your OpenAI API key' : 'This may take a few seconds'
+        );
 
         try {
             const screenshot = await SCREENSHOT_PIPELINE.buildScreenshotDataUrl(
@@ -454,10 +466,9 @@ async function handleScreenshotCapture(tab, region = null, devicePixelRatio = 1)
                 devicePixelRatio
             );
 
-            const eventDetails = await processImageWithBackend(
-                screenshot,
-                supabaseAuth.getAccessToken()
-            );
+            const eventDetails = apiKey
+                ? await processImageWithOpenAI(screenshot, apiKey)
+                : await processImageWithBackend(screenshot, supabaseAuth.getAccessToken());
 
             await hideStatusMessage(tab.id);
             await sendToContentScript(tab.id, {
@@ -741,66 +752,89 @@ async function processWithBackend(text, accessToken) {
     }
 }
 
+// Run one Extraction against OpenAI with the user's own key and hand back the
+// Events, whatever shape the model answered in. Shared by the Selection and
+// the Screenshot key paths so both normalise and validate the same way.
+async function extractWithOpenAI(requestBody, apiKey) {
+    const endpoint = await resolveOpenAiUrl();
+
+    const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${apiKey}`
+        },
+        body: JSON.stringify(requestBody)
+    });
+
+    if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error?.message || 'API request failed');
+    }
+
+    const data = await response.json();
+    const content = data?.choices?.[0]?.message?.content;
+    // Log the raw response for debugging
+    console.log('Raw GPT response:', content);
+
+    // Mirrors supabase/functions/_shared/parse-event-response.ts —
+    // empty/null content and an empty events array are valid no-event results.
+    if (!content || !content.trim()) {
+        return { events: [] };
+    }
+
+    const cleaned = content
+        .trim()
+        .replace(/^```(?:json)?\s*/i, '')
+        .replace(/\s*```$/i, '');
+
+    let parsed;
+    try {
+        parsed = JSON.parse(cleaned);
+    } catch (parseError) {
+        console.error('JSON Parse Error:', parseError);
+        console.error('Raw content:', content);
+        throw new Error('Failed to parse GPT response as JSON');
+    }
+
+    // Backward compatibility: wrap single event in events array
+    if (!Array.isArray(parsed.events) && parsed.title) {
+        parsed = { events: [parsed] };
+    }
+    if (!Array.isArray(parsed.events)) {
+        parsed = { events: [] };
+    }
+
+    validateEventResponse(parsed);
+    return parsed;
+}
+
 // Process text with OpenAI API
 async function processWithOpenAI(text, apiKey) {
     const now = new Date();
     const currentDateTime = now.toLocaleString();
 
     try {
-        const response = await fetch('https://api.openai.com/v1/chat/completions', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${apiKey}`
-            },
-            body: JSON.stringify(LLM_CONFIG.buildRequestBody(text, currentDateTime))
-        });
-
-        if (!response.ok) {
-            const errorData = await response.json();
-            throw new Error(errorData.error?.message || 'API request failed');
-        }
-
-        const data = await response.json();
-        const content = data?.choices?.[0]?.message?.content;
-        // Log the raw response for debugging
-        console.log('Raw GPT response:', content);
-
-        // Mirrors supabase/functions/_shared/parse-event-response.ts —
-        // empty/null content and an empty events array are valid no-event results.
-        if (!content || !content.trim()) {
-            return { events: [] };
-        }
-
-        const cleaned = content
-            .trim()
-            .replace(/^```(?:json)?\s*/i, '')
-            .replace(/\s*```$/i, '');
-
-        let parsed;
-        try {
-            parsed = JSON.parse(cleaned);
-        } catch (parseError) {
-            console.error('JSON Parse Error:', parseError);
-            console.error('Raw content:', content);
-            throw new Error('Failed to parse GPT response as JSON');
-        }
-
-        // Backward compatibility: wrap single event in events array
-        if (!Array.isArray(parsed.events) && parsed.title) {
-            parsed = { events: [parsed] };
-        }
-        if (!Array.isArray(parsed.events)) {
-            parsed = { events: [] };
-        }
-
-        validateEventResponse(parsed);
-        return parsed;
+        return await extractWithOpenAI(LLM_CONFIG.buildRequestBody(text, currentDateTime), apiKey);
     } catch (error) {
         console.error('Error calling OpenAI API:', error);
         throw new Error('Failed to process text: ' + error.message);
     }
 }
+
+// Send a Screenshot straight to OpenAI with the user's own key: their Region
+// never reaches the shared backend, which is what a saved key buys them on the
+// Selection path too. The error is reported as it came, so a key problem does
+// not read as a session problem.
+async function processImageWithOpenAI(imageDataUrl, apiKey) {
+    const currentDateTime = new Date().toLocaleString();
+
+    return extractWithOpenAI(
+        LLM_CONFIG.buildImageRequestBody(imageDataUrl, currentDateTime),
+        apiKey
+    );
+}
+
 // Create Google Calendar URL with optional timezone support
 function createGoogleCalendarUrl(eventDetails, timezone = null) {
     const baseUrl = 'https://calendar.google.com/calendar/render';

@@ -8,6 +8,9 @@ const extensionPath = path.resolve(__dirname, '..', '..');
 // install — the extension talks to the production backend in config.js.
 const BACKEND_BASE_URL_OVERRIDE_KEY = 'backend_base_url_override';
 
+// Nothing is ever spent on it: the override sends the key path to the stub.
+const STUB_API_KEY = 'sk-stub-own-key';
+
 const test = base.extend({
   context: async ({}, use) => {
     const context = await chromium.launchPersistentContext('', {
@@ -62,32 +65,36 @@ const test = base.extend({
     await use(page);
   },
 
-  // Seeds the backend override and a session, using the same storage keys the
-  // auth client persists, then re-runs the service worker's auth start-up so
-  // it picks both up. After this the extension reports itself signed in and
-  // every backend call lands on the stub.
-  signedIn: async ({ context, stubBackend }, use) => {
+  // Stores the backend override, so every service the extension calls — the
+  // Supabase auth endpoints, the Edge Functions and OpenAI — lands on the
+  // stub. Signs nobody in and saves no key: the two paths add those.
+  stubbedEndpoints: async ({ context, stubBackend }, use) => {
+    const [serviceWorker] = context.serviceWorkers();
+
+    await serviceWorker.evaluate(
+      ({ baseUrl, overrideKey }) => chrome.storage.local.set({ [overrideKey]: baseUrl }),
+      { baseUrl: stubBackend.baseUrl, overrideKey: BACKEND_BASE_URL_OVERRIDE_KEY }
+    );
+
+    await use(stubBackend.baseUrl);
+  },
+
+  // Seeds a session, using the same storage key the auth client persists, then
+  // re-runs the service worker's auth start-up so it picks the session and the
+  // override up. After this the extension reports itself signed in and every
+  // backend call lands on the stub.
+  signedIn: async ({ context, stubbedEndpoints }, use) => {
     const [serviceWorker] = context.serviceWorkers();
     const session = buildStubSession();
 
-    const authState = await serviceWorker.evaluate(
-      async ({ session, baseUrl, overrideKey }) => {
-        await chrome.storage.local.set({
-          [overrideKey]: baseUrl,
-          supabase_session: session,
-        });
-        await initializeAuth();
-        return {
-          isAuthenticated: supabaseAuth?.isAuthenticated() ?? false,
-          email: currentUser?.email ?? null,
-        };
-      },
-      {
-        session,
-        baseUrl: stubBackend.baseUrl,
-        overrideKey: BACKEND_BASE_URL_OVERRIDE_KEY,
-      }
-    );
+    const authState = await serviceWorker.evaluate(async (session) => {
+      await chrome.storage.local.set({ supabase_session: session });
+      await initializeAuth();
+      return {
+        isAuthenticated: supabaseAuth?.isAuthenticated() ?? false,
+        email: currentUser?.email ?? null,
+      };
+    }, session);
 
     if (!authState.isAuthenticated) {
       throw new Error(
@@ -96,6 +103,20 @@ const test = base.extend({
     }
 
     await use({ session, ...authState });
+  },
+
+  // Saves an OpenAI key the way the popup's settings do, so the Extraction
+  // takes the user's own key path. Combine it with `signedIn` for a user who
+  // has both.
+  ownKey: async ({ context, stubbedEndpoints }, use) => {
+    const [serviceWorker] = context.serviceWorkers();
+
+    await serviceWorker.evaluate(
+      (apiKey) => chrome.storage.sync.set({ apiKey }),
+      STUB_API_KEY
+    );
+
+    await use(STUB_API_KEY);
   },
 });
 
@@ -189,9 +210,10 @@ async function waitForPopupReady(popupPage) {
   );
 }
 
-// Clicks "Capture screenshot" in the popup. The popup is a tab here, so the
-// page under Extraction has to be the front tab for the service worker to
-// resolve it the way it resolves the page under a real popup.
+// Clicks "Capture screenshot" in the popup, which opens the Region overlay on
+// the page. The popup is a tab here, so the page under Extraction has to be
+// the front tab for the service worker to resolve it the way it resolves the
+// page under a real popup.
 async function triggerCapture(popupPage, sourcePage) {
   await sourcePage.bringToFront();
   await waitForPopupReady(popupPage);
@@ -208,6 +230,18 @@ async function drawRegion(page, { x, y, width, height }) {
   await page.mouse.move(x + Math.round(width / 2), y + Math.round(height / 2));
   await page.mouse.move(x + width, y + height);
   await page.mouse.up();
+}
+
+// Big enough to be a Region rather than a mis-click, small enough to fit any
+// window the suite runs in.
+const DEFAULT_REGION = { x: 60, y: 40, width: 320, height: 180 };
+
+// The whole trigger a user performs: the popup opens the overlay on the page,
+// and they drag a Region on it. Releasing the mouse starts the Extraction.
+async function captureFromPopup(popupPage, sourcePage, region = DEFAULT_REGION) {
+  await triggerCapture(popupPage, sourcePage);
+  await expect(sourcePage.locator('#calendar-region-overlay')).toBeVisible();
+  await drawRegion(sourcePage, region);
 }
 
 async function openPopup(context, extensionId) {
@@ -228,5 +262,8 @@ module.exports = {
   waitForPopupReady,
   triggerCapture,
   drawRegion,
+  captureFromPopup,
+  DEFAULT_REGION,
   BACKEND_BASE_URL_OVERRIDE_KEY,
+  STUB_API_KEY,
 };
