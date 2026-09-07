@@ -120,6 +120,9 @@ test.describe('Screenshot Extraction (stub backend)', () => {
 
     await captureRegion(popupPage, sourcePage);
 
+    // The usage is only stored once the Extraction comes back, and the whole
+    // capture runs first, so the modal is the sign that it is worth reading.
+    await expect(sourcePage.locator('.calendar-modal-overlay .event-card')).toHaveCount(1);
     await expect(popupPage.locator('#usageStats')).toBeVisible();
     await expect(popupPage.locator('#usageText')).toHaveText(
       '31 / 50 requests used this month'

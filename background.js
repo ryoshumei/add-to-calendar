@@ -302,37 +302,7 @@ async function handleContextMenuClick(info, tab) {
                 if (!apiKey) {
                     console.log('❌ No API key found - showing setup guidance');
                     await hideStatusMessage(tab.id);
-                    
-                    // Show modal with setup instructions instead of notification
-                    try {
-                        await chrome.tabs.sendMessage(tab.id, {
-                            type: "SHOW_SETUP_REQUIRED"
-                        });
-                        console.log('✅ Setup modal message sent');
-                    } catch (error) {
-                        console.log('⚠️ Content script not ready, injecting for setup modal...');
-                        // Try to inject content script and retry
-                        try {
-                            await chrome.scripting.executeScript({
-                                target: {tabId: tab.id},
-                                files: ['content.js']
-                            });
-                            await new Promise(resolve => setTimeout(resolve, 100));
-                            await chrome.tabs.sendMessage(tab.id, {
-                                type: "SHOW_SETUP_REQUIRED"
-                            });
-                            console.log('✅ Setup modal sent after injection');
-                        } catch (retryError) {
-                            // Fallback to notification if modal fails completely
-                            console.log('⚠️ Modal failed completely, using notification fallback');
-                            chrome.notifications.create({
-                                type: 'basic',
-                                iconUrl: 'icons/icon128.png',
-                                title: 'Setup Required',
-                                message: 'Please sign in with Google or set your OpenAI API key in extension settings'
-                            });
-                        }
-                    }
+                    await showSetupRequired(tab.id);
                     return;
                 }
 
@@ -358,7 +328,7 @@ async function handleContextMenuClick(info, tab) {
             // Try to send message to content script
             // eventDetails now contains { events: [...] } array structure
             try {
-                const response = await chrome.tabs.sendMessage(tab.id, {
+                const response = await sendToContentScript(tab.id, {
                     type: "SHOW_CONFIRMATION",
                     requestId,
                     events: eventDetails.events, // Send events array
@@ -369,31 +339,12 @@ async function handleContextMenuClick(info, tab) {
                 // If we get here, the content script handled the message
                 console.log('Content script handled message:', response);
             } catch (error) {
-                // If content script isn't ready, inject it
-                console.log('Injecting content script...');
-                await chrome.scripting.executeScript({
-                    target: {tabId: tab.id},
-                    files: ['content.js']
-                });
-
-                // Try sending the message again after a short delay
-                await new Promise(resolve => setTimeout(resolve, 100));
-
-                try {
-                    await chrome.tabs.sendMessage(tab.id, {
-                        type: "SHOW_CONFIRMATION",
-                        requestId,
-                        events: eventDetails.events, // Send events array
-                        calendarUrl: result.calendarUrl,
-                        result: result
-                    });
-                } catch (retryError) {
-                    // If it still fails, open calendar directly for first event
-                    if (result.calendarUrl) {
-                        chrome.tabs.create({url: result.calendarUrl});
-                    } else if (eventDetails.events && eventDetails.events.length > 0) {
-                        chrome.tabs.create({url: createGoogleCalendarUrl(eventDetails.events[0])});
-                    }
+                // The page cannot show the modal at all, so the first Event
+                // opens in Google Calendar directly instead.
+                if (result.calendarUrl) {
+                    chrome.tabs.create({url: result.calendarUrl});
+                } else if (eventDetails.events && eventDetails.events.length > 0) {
+                    chrome.tabs.create({url: createGoogleCalendarUrl(eventDetails.events[0])});
                 }
             }
         } catch (error) {
@@ -554,31 +505,16 @@ async function sendToContentScript(tabId, message) {
 async function sendStatusMessage(tabId, message, detail = '') {
     console.log('📤 Sending status message:', message, detail);
     try {
-        await chrome.tabs.sendMessage(tabId, {
+        await sendToContentScript(tabId, {
             type: "SHOW_STATUS",
             message: message,
             detail: detail
         });
         console.log('✅ Status message sent successfully');
     } catch (error) {
-        console.log('⚠️ Content script not ready, injecting...', error.message);
-        // Inject content script if not loaded
-        try {
-            await chrome.scripting.executeScript({
-                target: {tabId: tabId},
-                files: ['content.js']
-            });
-            console.log('✅ Content script injected');
-            await new Promise(resolve => setTimeout(resolve, 100));
-            await chrome.tabs.sendMessage(tabId, {
-                type: "SHOW_STATUS",
-                message: message,
-                detail: detail
-            });
-            console.log('✅ Status message sent after injection');
-        } catch (e) {
-            console.error('❌ Failed to show status message:', e);
-        }
+        // A page that cannot show progress can still show the result, so this
+        // is as far as it goes.
+        console.error('❌ Failed to show status message:', error);
     }
 }
 

@@ -42,6 +42,32 @@ async function expectDismissedWithNothingCaptured(
   expect(stubBackend.requestsTo(PROCESS_IMAGE_PATH, 'POST')).toHaveLength(1);
 }
 
+// Holds the capture at the moment the service worker asks for it, so a test
+// can look at the page as the camera would see it. Returns a release.
+async function holdTheCapture(context) {
+  const [serviceWorker] = context.serviceWorkers();
+
+  await serviceWorker.evaluate(() => {
+    const standIn = self.captureVisibleTab;
+    self.captureReached = false;
+    self.captureVisibleTab = async (tab) => {
+      self.captureReached = true;
+      await new Promise((release) => {
+        self.releaseCapture = release;
+      });
+      return standIn(tab);
+    };
+  });
+
+  return {
+    reached: () =>
+      expect
+        .poll(() => serviceWorker.evaluate(() => self.captureReached))
+        .toBe(true),
+    release: () => serviceWorker.evaluate(() => self.releaseCapture()),
+  };
+}
+
 // Opens the overlay the way a user does, and leaves the pointer pressed at the
 // corner the Region starts from.
 async function startDrawing(context, extensionId, sourcePage, from) {
@@ -184,6 +210,36 @@ test.describe('Region overlay', () => {
     await expect(sourcePage.locator('.calendar-modal-overlay .event-card')).toHaveCount(1);
     const [post] = stubBackend.requestsTo(PROCESS_IMAGE_PATH, 'POST');
     expect(await imageSize(sourcePage, post.body.image)).toEqual(WHOLE_TAB);
+  });
+
+  test('nothing the extension drew is on the page when the tab is captured', async ({
+    context,
+    extensionId,
+    stubBackend,
+    sourcePage,
+    signedIn,
+  }) => {
+    await standInForCapture(context, sourcePage);
+    const popupPage = await openPopup(context, extensionId);
+
+    // An earlier Extraction leaves its confirmation modal on the page, and it
+    // would be in the next Screenshot as surely as the overlay would.
+    await triggerCapture(popupPage, sourcePage);
+    await expect(sourcePage.locator(OVERLAY)).toBeVisible();
+    await drawRegion(sourcePage, A_REGION);
+    await expect(sourcePage.locator('.calendar-modal-overlay .event-card')).toHaveCount(1);
+
+    const capture = await holdTheCapture(context);
+    await triggerCapture(popupPage, sourcePage);
+    await expect(sourcePage.locator(OVERLAY)).toBeVisible();
+    await drawRegion(sourcePage, { x: 100, y: 120, width: 260, height: 160 });
+    await capture.reached();
+
+    expect(await sourcePage.locator(OVERLAY).count()).toBe(0);
+    expect(await sourcePage.locator('.calendar-modal-overlay').count()).toBe(0);
+
+    await capture.release();
+    await expect(sourcePage.locator('.calendar-modal-overlay .event-card')).toHaveCount(1);
   });
 
   test('a Region drawn towards the top left is the same rectangle', async ({
