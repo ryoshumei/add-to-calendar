@@ -149,10 +149,34 @@ async function standInForCapture(context, page, size = null) {
 
   const [serviceWorker] = context.serviceWorkers();
   await serviceWorker.evaluate((dataUrl) => {
-    self.captureVisibleTab = async () => dataUrl;
+    self.captureCount = 0;
+    self.captureVisibleTab = async () => {
+      self.captureCount += 1;
+      return dataUrl;
+    };
   }, captureDataUrl);
 
   return captureDataUrl;
+}
+
+// Decodes a data URL in the page and measures it.
+async function imageSize(page, dataUrl) {
+  return page.evaluate(
+    (src) =>
+      new Promise((resolve, reject) => {
+        const image = new Image();
+        image.onload = () => resolve({ width: image.naturalWidth, height: image.naturalHeight });
+        image.onerror = () => reject(new Error('The Screenshot could not be decoded'));
+        image.src = src;
+      }),
+    dataUrl
+  );
+}
+
+// How many times the tab has been captured since the stand-in was installed.
+async function capturesTaken(context) {
+  const [serviceWorker] = context.serviceWorkers();
+  return serviceWorker.evaluate(() => self.captureCount ?? 0);
 }
 
 // The capture button is in the popup's static HTML, but its click handler and
@@ -199,6 +223,8 @@ module.exports = {
   extractFromSelection,
   openPopup,
   standInForCapture,
+  capturesTaken,
+  imageSize,
   waitForPopupReady,
   triggerCapture,
   drawRegion,

@@ -572,6 +572,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
 const REGION_OVERLAY_ID = 'calendar-region-overlay';
 
+// A drag shorter than this in either direction is a mis-click, not a Region:
+// it is dismissed rather than sent, so a slip costs nothing.
+const MIN_REGION_PX = 10;
+
+// How long a mis-click waits before it dismisses the overlay. Each half of a
+// double-click is a mis-click on its own, so dismissing one straight away
+// would take the overlay away before the double-click that sends the whole
+// visible tab could arrive.
+const MISCLICK_DISMISS_MS = 300;
+
 // The layer currently on the page, with the listeners that tear it down.
 let regionOverlay = null;
 
@@ -598,13 +608,14 @@ function showRegionOverlay() {
     (document.body || document.documentElement).appendChild(overlay);
     overlay.focus({ preventScroll: true });
 
-    const state = { overlay, rect, start: null };
+    const state = { overlay, rect, start: null, dismissTimer: null };
 
     const onMouseDown = (event) => {
         if (event.button !== 0) return;
         // Otherwise the press starts a text selection on the page under the
         // overlay instead of a Region.
         event.preventDefault();
+        cancelPendingDismissal(state);
         state.start = { x: event.clientX, y: event.clientY };
         overlay.classList.add('drawing');
         drawRegionRect(state, state.start);
@@ -623,15 +634,40 @@ function showRegionOverlay() {
         if (!state.start) return;
         const region = toRegion(state.start, { x: event.clientX, y: event.clientY });
         state.start = null;
+
+        if (region.width < MIN_REGION_PX || region.height < MIN_REGION_PX) {
+            state.dismissTimer = setTimeout(hideRegionOverlay, MISCLICK_DISMISS_MS);
+            return;
+        }
+
         sendRegion(region);
     };
 
+    // The whole visible tab is a Region too, for a page that needs no drawing.
+    const onDoubleClick = () => {
+        cancelPendingDismissal(state);
+        sendRegion(null);
+    };
+
+    const onKeyDown = (event) => {
+        if (event.key === 'Escape') {
+            event.preventDefault();
+            hideRegionOverlay();
+        } else if (event.key === 'Enter') {
+            event.preventDefault();
+            sendRegion(null);
+        }
+    };
+
     overlay.addEventListener('mousedown', onMouseDown);
+    overlay.addEventListener('dblclick', onDoubleClick);
     window.addEventListener('mousemove', onMouseMove, true);
     window.addEventListener('mouseup', onMouseUp, true);
+    window.addEventListener('keydown', onKeyDown, true);
     state.removeListeners = () => {
         window.removeEventListener('mousemove', onMouseMove, true);
         window.removeEventListener('mouseup', onMouseUp, true);
+        window.removeEventListener('keydown', onKeyDown, true);
     };
 
     regionOverlay = state;
@@ -641,9 +677,17 @@ function showRegionOverlay() {
 function hideRegionOverlay() {
     if (!regionOverlay) return;
 
+    cancelPendingDismissal(regionOverlay);
     regionOverlay.removeListeners();
     regionOverlay.overlay.remove();
     regionOverlay = null;
+}
+
+function cancelPendingDismissal(state) {
+    if (!state.dismissTimer) return;
+
+    clearTimeout(state.dismissTimer);
+    state.dismissTimer = null;
 }
 
 function drawRegionRect(state, corner) {

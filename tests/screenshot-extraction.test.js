@@ -16,6 +16,7 @@ import {
   standInForCapture,
   triggerCapture,
   drawRegion,
+  imageSize,
 } from './fixtures/extension-fixtures.js';
 
 const PROCESS_IMAGE_PATH = '/functions/v1/process-image';
@@ -24,20 +25,6 @@ const OVERLAY = '#calendar-region-overlay';
 // Big enough to be a Region rather than a mis-click, small enough to fit any
 // window the suite runs in.
 const A_REGION = { x: 60, y: 40, width: 320, height: 180 };
-
-// Decodes a data URL in the page and measures it.
-async function imageSize(page, dataUrl) {
-  return page.evaluate(
-    (src) =>
-      new Promise((resolve, reject) => {
-        const image = new Image();
-        image.onload = () => resolve({ width: image.naturalWidth, height: image.naturalHeight });
-        image.onerror = () => reject(new Error('The Screenshot could not be decoded'));
-        image.src = src;
-      }),
-    dataUrl
-  );
-}
 
 // Runs the whole trigger: the popup opens the overlay on the page, and the
 // user drags a Region on it.
