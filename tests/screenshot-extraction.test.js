@@ -40,11 +40,22 @@ async function standInForCapture(context, page, { width = 1200, height = 800 } =
   return captureDataUrl;
 }
 
+// The capture button is in the popup's static HTML, but its click handler and
+// the storage listener behind the usage bar are attached only after an async
+// start-up. Driving the popup before that finishes loses the click or the
+// usage update, so wait until start-up has painted the auth UI.
+async function waitForPopupReady(popupPage) {
+  await popupPage.waitForFunction(
+    () => document.getElementById('loginSection').style.display !== ''
+  );
+}
+
 // Clicks "Capture screenshot" in the popup. The popup is a tab here, so the
 // page under Extraction has to be the front tab for the service worker to
 // resolve it the way it resolves the page under a real popup.
 async function captureFromPopup(popupPage, sourcePage) {
   await sourcePage.bringToFront();
+  await waitForPopupReady(popupPage);
   await popupPage.locator('#captureScreenshotBtn').click();
 }
 
@@ -127,9 +138,8 @@ test.describe('Screenshot Extraction (stub backend)', () => {
     stubBackend.responseDelayMs = 750;
     await standInForCapture(context, sourcePage);
     const popupPage = await openPopup(context, extensionId);
-    await sourcePage.bringToFront();
 
-    await popupPage.locator('#captureScreenshotBtn').click();
+    await captureFromPopup(popupPage, sourcePage);
     await popupPage.locator('#captureScreenshotBtn').click();
 
     const card = sourcePage.locator('.calendar-modal-overlay .event-card');
