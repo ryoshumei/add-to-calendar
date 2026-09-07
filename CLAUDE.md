@@ -133,10 +133,11 @@ npm install:deps          # Install browser system dependencies
 ### Stub-Backend Harness (end-to-end without the real backend)
 `tests/fixtures/stub-backend.js` runs a local HTTP server that answers the Supabase auth endpoint and the Edge Functions, records every request (headers and body), and serves the page a test drives a Selection from. It costs nothing and touches no network.
 
-- `stubBackend` fixture: starts/stops the server; `stub.events` and `stub.usage` are the canned answers, `stub.requestsTo(pathname, method)` the assertions
+- `stubBackend` fixture: starts/stops the server; `stub.events` and `stub.usage` are the canned answers for both `process-text` and `process-image`, `stub.requestsTo(pathname, method)` the assertions. `stub.textResponse` / `stub.imageResponse` (`{ status, body }`) make one endpoint fail instead; `stub.responseDelayMs` holds the Edge Function answers back so a test can act mid-Extraction
 - `signedIn` fixture: writes the stub's base URL to `backend_base_url_override` and a session to `supabase_session` in `chrome.storage.local`, then re-runs `initializeAuth()` so the service worker picks both up
 - `scripts/backend-config.js`: resolves those URLs. **With no override stored — every real install — the production URLs in config.js are used unchanged**; the extension never writes that key itself
-- Example: `tests/selection-extraction.test.js` (trigger → backend request → confirmation modal → popup usage bar)
+- Examples: `tests/selection-extraction.test.js` and `tests/screenshot-extraction.test.js` (trigger → backend request → confirmation modal → popup usage bar)
+- `chrome.tabs.captureVisibleTab` needs the activeTab grant Chrome only gives on a real toolbar click, so a Screenshot test replaces the service worker's `captureVisibleTab` wrapper with a known image; the real capture is a manual check before release
 
 ### Prompt Evals (live LLM, opt-in)
 Real-text extraction cases run against the actual prompt + parser via OpenAI:

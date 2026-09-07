@@ -176,6 +176,24 @@ test.describe('Screenshot Extraction (stub backend)', () => {
     await expect(sourcePage.locator('.calendar-modal-overlay .event-card')).toHaveCount(0);
   });
 
+  test('a Screenshot with nothing to extract says so', async ({
+    context,
+    extensionId,
+    stubBackend,
+    sourcePage,
+    signedIn,
+  }) => {
+    stubBackend.events = [];
+    await standInForCapture(context, sourcePage);
+    const popupPage = await openPopup(context, extensionId);
+
+    await captureFromPopup(popupPage, sourcePage);
+
+    await expect(sourcePage.locator('.calendar-modal-overlay .no-events-message')).toContainText(
+      'screenshot'
+    );
+  });
+
   test('a page Chrome will not capture is reported in the popup', async ({
     context,
     extensionId,

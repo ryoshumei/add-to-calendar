@@ -853,9 +853,12 @@ function showConfirmationModal(events, fallbackCalendarUrl, screenshot) {
         return date.toLocaleString();
     };
 
-    // Generate event cards HTML (empty state when no events were found)
+    // Generate event cards HTML (empty state names the source it read)
+    const emptyMessage = screenshot
+        ? 'No events were found in this screenshot.'
+        : 'No events were found in the selected text.';
     const eventsHtml = events.length === 0
-        ? '<div class="no-events-message">No events were found in the selected text.</div>'
+        ? `<div class="no-events-message">${emptyMessage}</div>`
         : events.map((event, index) => {
         const calendarUrl = createGoogleCalendarUrlForContent(event);
         return `
