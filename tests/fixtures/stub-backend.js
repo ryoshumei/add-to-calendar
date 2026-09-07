@@ -1,8 +1,9 @@
 // tests/fixtures/stub-backend.js
-// A local stand-in for the shared backend, so an Extraction can be driven end
-// to end without spending a real request: it answers the Supabase auth
-// endpoint the session-restore path calls and the Edge Function the extension
-// posts a Source to, and it records every request it receives so a test can
+// A local stand-in for everything the extension talks to, so an Extraction can
+// be driven end to end without spending a real request: it answers the
+// Supabase auth endpoint the session-restore path calls, the Edge Function the
+// extension posts a Source to, and OpenAI's chat completions endpoint the own
+// key path posts to, and it records every request it receives so a test can
 // assert on what the extension actually sent.
 //
 // It also serves the page a test drives the Selection from, which keeps the
@@ -119,6 +120,11 @@ async function startStubBackend() {
     // returning the canned Events.
     textResponse: null,
     imageResponse: null,
+    openAiResponse: null,
+    // Raw model output for the OpenAI route. Left null, the canned Events are
+    // serialised into it; set it to hand the key path the fenced JSON, single
+    // object or empty content a real model sometimes returns.
+    openAiContent: null,
     requestsTo(pathname, method) {
       return requests.filter(
         (request) =>
@@ -185,6 +191,25 @@ async function startStubBackend() {
           return;
         }
         json(200, { eventDetails: { events: stub.events }, usage: stub.usage });
+        return;
+      }
+
+      // OpenAI's chat completions endpoint, reached because the test-only
+      // override aims the key path here too.
+      if (url.pathname === '/v1/chat/completions') {
+        if (stub.openAiResponse) {
+          json(stub.openAiResponse.status, stub.openAiResponse.body);
+          return;
+        }
+        const content =
+          stub.openAiContent === null
+            ? JSON.stringify({ events: stub.events })
+            : stub.openAiContent;
+        json(200, {
+          id: 'chatcmpl-stub',
+          object: 'chat.completion',
+          choices: [{ index: 0, message: { role: 'assistant', content }, finish_reason: 'stop' }],
+        });
         return;
       }
 
