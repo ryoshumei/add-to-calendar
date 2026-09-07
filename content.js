@@ -411,6 +411,51 @@ style.textContent = `
     opacity: 0.9;
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
 }
+
+/* Region overlay: the layer the user drags a Region on */
+.calendar-region-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: rgba(15, 23, 42, 0.32);
+    cursor: crosshair;
+    user-select: none;
+    outline: none;
+    z-index: 2147483647;
+}
+
+/* While a Region is being drawn the page shows through, and the shadow around
+   the rectangle dims everything the Screenshot will leave out. */
+.calendar-region-overlay.drawing {
+    background-color: transparent;
+}
+
+.calendar-region-overlay .region-rect {
+    position: fixed;
+    border: 1px solid #ffffff;
+    outline: 1px solid rgba(66, 133, 244, 0.9);
+    box-sizing: border-box;
+    box-shadow: 0 0 0 100vmax rgba(15, 23, 42, 0.32);
+    pointer-events: none;
+}
+
+.calendar-region-overlay .region-hint {
+    position: fixed;
+    top: 24px;
+    left: 50%;
+    transform: translateX(-50%);
+    padding: 8px 16px;
+    border-radius: 999px;
+    background-color: rgba(32, 33, 36, 0.92);
+    color: #ffffff;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    font-size: 13px;
+    line-height: 1.4;
+    white-space: nowrap;
+    pointer-events: none;
+}
 `;
 document.head.appendChild(style);
 
@@ -513,8 +558,183 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         showSetupRequiredModal();
     } else if (message.type === "SHOW_EXTRACTION_ERROR") {
         showExtractionErrorModal(message.message);
+    } else if (message.type === "SHOW_REGION_OVERLAY") {
+        showRegionOverlay();
     }
 });
+
+// ---------------------------------------------------------------------------
+// Region overlay
+//
+// A Screenshot is the visible tab cut down to the Region the user drags. This
+// overlay is what they drag on; the service worker does the capturing, so all
+// the overlay reports is the rectangle and the display's device pixel ratio.
+
+const REGION_OVERLAY_ID = 'calendar-region-overlay';
+
+// A drag shorter than this in either direction is a mis-click, not a Region:
+// it is dismissed rather than sent, so a slip costs nothing.
+const MIN_REGION_PX = 10;
+
+// How long a mis-click waits before it dismisses the overlay. Each half of a
+// double-click is a mis-click on its own, so dismissing one straight away
+// would take the overlay away before the double-click that sends the whole
+// visible tab could arrive.
+const MISCLICK_DISMISS_MS = 300;
+
+// The layer currently on the page, with the listeners that tear it down.
+let regionOverlay = null;
+
+function showRegionOverlay() {
+    hideRegionOverlay();
+
+    const overlay = document.createElement('div');
+    overlay.id = REGION_OVERLAY_ID;
+    overlay.className = 'calendar-region-overlay';
+    // Focusable so the keys that close it arrive here rather than at whatever
+    // the page had focused.
+    overlay.tabIndex = -1;
+
+    const hint = document.createElement('div');
+    hint.className = 'region-hint';
+    hint.textContent = 'Drag to choose a Region  ·  Enter for the whole tab  ·  Esc to cancel';
+
+    const rect = document.createElement('div');
+    rect.className = 'region-rect';
+    rect.style.display = 'none';
+
+    overlay.appendChild(hint);
+    overlay.appendChild(rect);
+    (document.body || document.documentElement).appendChild(overlay);
+    overlay.focus({ preventScroll: true });
+
+    const state = { overlay, rect, start: null, dismissTimer: null };
+
+    const onMouseDown = (event) => {
+        if (event.button !== 0) return;
+        // Otherwise the press starts a text selection on the page under the
+        // overlay instead of a Region.
+        event.preventDefault();
+        cancelPendingDismissal(state);
+        state.start = { x: event.clientX, y: event.clientY };
+        overlay.classList.add('drawing');
+        drawRegionRect(state, state.start);
+    };
+
+    // On the window rather than the overlay, so a drag that runs off the edge
+    // of the window still moves the rectangle.
+    const onMouseMove = (event) => {
+        if (!state.start) return;
+        drawRegionRect(state, { x: event.clientX, y: event.clientY });
+    };
+
+    // Releasing the mouse is the whole confirmation: the Region goes off for
+    // Extraction as it is.
+    const onMouseUp = (event) => {
+        if (!state.start) return;
+        const region = toRegion(state.start, { x: event.clientX, y: event.clientY });
+        state.start = null;
+
+        if (region.width < MIN_REGION_PX || region.height < MIN_REGION_PX) {
+            state.dismissTimer = setTimeout(hideRegionOverlay, MISCLICK_DISMISS_MS);
+            return;
+        }
+
+        sendRegion(region);
+    };
+
+    // The whole visible tab is a Region too, for a page that needs no drawing.
+    const onDoubleClick = () => {
+        cancelPendingDismissal(state);
+        sendRegion(null);
+    };
+
+    const onKeyDown = (event) => {
+        if (event.key === 'Escape') {
+            event.preventDefault();
+            hideRegionOverlay();
+        } else if (event.key === 'Enter') {
+            event.preventDefault();
+            sendRegion(null);
+        }
+    };
+
+    overlay.addEventListener('mousedown', onMouseDown);
+    overlay.addEventListener('dblclick', onDoubleClick);
+    window.addEventListener('mousemove', onMouseMove, true);
+    window.addEventListener('mouseup', onMouseUp, true);
+    window.addEventListener('keydown', onKeyDown, true);
+    state.removeListeners = () => {
+        window.removeEventListener('mousemove', onMouseMove, true);
+        window.removeEventListener('mouseup', onMouseUp, true);
+        window.removeEventListener('keydown', onKeyDown, true);
+    };
+
+    regionOverlay = state;
+}
+
+// Takes the overlay off the page. Safe to call when there is none.
+function hideRegionOverlay() {
+    if (!regionOverlay) return;
+
+    cancelPendingDismissal(regionOverlay);
+    regionOverlay.removeListeners();
+    regionOverlay.overlay.remove();
+    regionOverlay = null;
+}
+
+function cancelPendingDismissal(state) {
+    if (!state.dismissTimer) return;
+
+    clearTimeout(state.dismissTimer);
+    state.dismissTimer = null;
+}
+
+function drawRegionRect(state, corner) {
+    const region = toRegion(state.start, corner);
+
+    state.rect.style.display = 'block';
+    state.rect.style.left = `${region.x}px`;
+    state.rect.style.top = `${region.y}px`;
+    state.rect.style.width = `${region.width}px`;
+    state.rect.style.height = `${region.height}px`;
+}
+
+// The rectangle between the two corners of the drag, whichever way round it
+// was dragged, in CSS pixels from the top left of the viewport.
+function toRegion(from, to) {
+    return {
+        x: Math.min(from.x, to.x),
+        y: Math.min(from.y, to.y),
+        width: Math.abs(to.x - from.x),
+        height: Math.abs(to.y - from.y)
+    };
+}
+
+// Hand the Region to the service worker, which captures the tab and runs the
+// Extraction on it. Anything the extension drew — this overlay, a modal left
+// over from an earlier Extraction — comes off the page first, and the capture
+// waits for the frame that paints its absence, so none of it is in the
+// Screenshot.
+async function sendRegion(region) {
+    const devicePixelRatio = window.devicePixelRatio;
+
+    hideRegionOverlay();
+    document.querySelectorAll('.calendar-modal-overlay').forEach(modal => modal.remove());
+    await afterNextPaint();
+
+    try {
+        await chrome.runtime.sendMessage({ action: 'regionDrawn', region, devicePixelRatio });
+    } catch (error) {
+        console.error('Could not send the Region for Extraction:', error);
+    }
+}
+
+// requestAnimationFrame runs just before the next paint, so it takes a second
+// one to be back after the frame that no longer has the overlay in it.
+function afterNextPaint() {
+    return new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+}
 
 // Display a status/loading modal
 function showStatusModal(message, detail = '') {

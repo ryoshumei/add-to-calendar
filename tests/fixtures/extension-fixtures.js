@@ -150,37 +150,54 @@ async function extractFromSelection(context, page) {
   }, selectionText);
 }
 
-async function openPopup(context, extensionId) {
-  const popupPage = await context.newPage();
-  await popupPage.goto(`chrome-extension://${extensionId}/popup/popup.html`);
-  return popupPage;
-}
-
-// Draws a capture-sized image in the page and hands it to the service worker
-// as the tab capture the next trigger will see.
-async function standInForCapture(context, page, { width = 1200, height = 800 } = {}) {
-  const captureDataUrl = await page.evaluate(
-    ({ width, height }) => {
-      const canvas = document.createElement('canvas');
-      canvas.width = width;
-      canvas.height = height;
-      const ctx = canvas.getContext('2d');
-      const gradient = ctx.createLinearGradient(0, 0, width, height);
-      gradient.addColorStop(0, '#ff0000');
-      gradient.addColorStop(1, '#0000ff');
-      ctx.fillStyle = gradient;
-      ctx.fillRect(0, 0, width, height);
-      return canvas.toDataURL('image/png');
-    },
-    { width, height }
-  );
+// Stands in for chrome.tabs.captureVisibleTab, which needs the activeTab grant
+// Chrome only gives on a real toolbar click. The image is drawn at the size a
+// real capture of this page would be — the viewport in device pixels — so a
+// Region in CSS pixels crops out of it the way it would in production.
+async function standInForCapture(context, page, size = null) {
+  const captureDataUrl = await page.evaluate((size) => {
+    const canvas = document.createElement('canvas');
+    canvas.width = size ? size.width : Math.round(window.innerWidth * window.devicePixelRatio);
+    canvas.height = size ? size.height : Math.round(window.innerHeight * window.devicePixelRatio);
+    const ctx = canvas.getContext('2d');
+    const gradient = ctx.createLinearGradient(0, 0, canvas.width, canvas.height);
+    gradient.addColorStop(0, '#ff0000');
+    gradient.addColorStop(1, '#0000ff');
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    return canvas.toDataURL('image/png');
+  }, size);
 
   const [serviceWorker] = context.serviceWorkers();
   await serviceWorker.evaluate((dataUrl) => {
-    self.captureVisibleTab = async () => dataUrl;
+    self.captureCount = 0;
+    self.captureVisibleTab = async () => {
+      self.captureCount += 1;
+      return dataUrl;
+    };
   }, captureDataUrl);
 
   return captureDataUrl;
+}
+
+// Decodes a data URL in the page and measures it.
+async function imageSize(page, dataUrl) {
+  return page.evaluate(
+    (src) =>
+      new Promise((resolve, reject) => {
+        const image = new Image();
+        image.onload = () => resolve({ width: image.naturalWidth, height: image.naturalHeight });
+        image.onerror = () => reject(new Error('The Screenshot could not be decoded'));
+        image.src = src;
+      }),
+    dataUrl
+  );
+}
+
+// How many times the tab has been captured since the stand-in was installed.
+async function capturesTaken(context) {
+  const [serviceWorker] = context.serviceWorkers();
+  return serviceWorker.evaluate(() => self.captureCount ?? 0);
 }
 
 // The capture button is in the popup's static HTML, but its click handler and
@@ -193,13 +210,44 @@ async function waitForPopupReady(popupPage) {
   );
 }
 
-// Clicks "Capture screenshot" in the popup. The popup is a tab here, so the
-// page under Extraction has to be the front tab for the service worker to
-// resolve it the way it resolves the page under a real popup.
-async function captureFromPopup(popupPage, sourcePage) {
+// Clicks "Capture screenshot" in the popup, which opens the Region overlay on
+// the page. The popup is a tab here, so the page under Extraction has to be
+// the front tab for the service worker to resolve it the way it resolves the
+// page under a real popup.
+async function triggerCapture(popupPage, sourcePage) {
   await sourcePage.bringToFront();
   await waitForPopupReady(popupPage);
   await popupPage.locator('#captureScreenshotBtn').click();
+}
+
+// Drags the Region the user would draw, in CSS pixels from the top left of the
+// viewport, and leaves the mouse where the drag ended.
+async function drawRegion(page, { x, y, width, height }) {
+  await page.bringToFront();
+  await page.mouse.move(x, y);
+  await page.mouse.down();
+  // Two moves, so a rectangle that only follows the last event still shows.
+  await page.mouse.move(x + Math.round(width / 2), y + Math.round(height / 2));
+  await page.mouse.move(x + width, y + height);
+  await page.mouse.up();
+}
+
+// Big enough to be a Region rather than a mis-click, small enough to fit any
+// window the suite runs in.
+const DEFAULT_REGION = { x: 60, y: 40, width: 320, height: 180 };
+
+// The whole trigger a user performs: the popup opens the overlay on the page,
+// and they drag a Region on it. Releasing the mouse starts the Extraction.
+async function captureFromPopup(popupPage, sourcePage, region = DEFAULT_REGION) {
+  await triggerCapture(popupPage, sourcePage);
+  await expect(sourcePage.locator('#calendar-region-overlay')).toBeVisible();
+  await drawRegion(sourcePage, region);
+}
+
+async function openPopup(context, extensionId) {
+  const popupPage = await context.newPage();
+  await popupPage.goto(`chrome-extension://${extensionId}/popup/popup.html`);
+  return popupPage;
 }
 
 module.exports = {
@@ -209,7 +257,13 @@ module.exports = {
   extractFromSelection,
   openPopup,
   standInForCapture,
+  capturesTaken,
+  imageSize,
+  waitForPopupReady,
+  triggerCapture,
+  drawRegion,
   captureFromPopup,
+  DEFAULT_REGION,
   BACKEND_BASE_URL_OVERRIDE_KEY,
   STUB_API_KEY,
 };

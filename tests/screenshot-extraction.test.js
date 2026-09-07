@@ -1,7 +1,7 @@
 // tests/screenshot-extraction.test.js
-// Drives a whole-tab Screenshot from the popup button through the backend
-// Extraction path against the stub backend: no OpenAI key, no real Supabase
-// project, no money spent.
+// Drives a Screenshot from the popup button — overlay, Region, capture — through
+// the backend Extraction path against the stub backend: no OpenAI key, no real
+// Supabase project, no money spent.
 //
 // One thing here is not the shipped code: chrome.tabs.captureVisibleTab needs
 // the activeTab grant Chrome only gives on a real toolbar click, which
@@ -15,9 +15,12 @@ import {
   openPopup,
   standInForCapture,
   captureFromPopup,
+  imageSize,
+  DEFAULT_REGION,
 } from './fixtures/extension-fixtures.js';
 
 const PROCESS_IMAGE_PATH = '/functions/v1/process-image';
+const OVERLAY = '#calendar-region-overlay';
 
 test.describe('Screenshot Extraction (stub backend)', () => {
   test('the Screenshot is posted to the stub and its Event reaches the modal', async ({
@@ -46,6 +49,31 @@ test.describe('Screenshot Extraction (stub backend)', () => {
     expect(posts[0].body.currentDateTime).toBeTruthy();
     expect(posts[0].headers.authorization).toBe(`Bearer ${signedIn.session.access_token}`);
     expect(posts[0].headers['x-extension-version']).toBe(manifestVersion);
+  });
+
+  test('the Screenshot that reaches the stub is the Region the user drew', async ({
+    context,
+    extensionId,
+    stubBackend,
+    sourcePage,
+    signedIn,
+  }) => {
+    // A capture the size a real one would be: the viewport in device pixels.
+    await standInForCapture(context, sourcePage);
+    const popupPage = await openPopup(context, extensionId);
+
+    await captureFromPopup(popupPage, sourcePage, DEFAULT_REGION);
+
+    await expect(sourcePage.locator('.calendar-modal-overlay .event-card')).toHaveCount(1);
+    const [post] = stubBackend.requestsTo(PROCESS_IMAGE_PATH, 'POST');
+    const devicePixelRatio = await sourcePage.evaluate(() => window.devicePixelRatio);
+
+    // The Region is drawn in CSS pixels and captured in device pixels, and at
+    // this size the 1600 px cap never bites, so nothing is downscaled away.
+    expect(await imageSize(sourcePage, post.body.image)).toEqual({
+      width: Math.round(DEFAULT_REGION.width * devicePixelRatio),
+      height: Math.round(DEFAULT_REGION.height * devicePixelRatio),
+    });
   });
 
   test('the modal shows a thumbnail of the Screenshot that was sent', async ({
@@ -80,7 +108,14 @@ test.describe('Screenshot Extraction (stub backend)', () => {
 
     await captureFromPopup(popupPage, sourcePage);
 
-    await expect(popupPage.locator('#usageStats')).toBeVisible();
+    // The usage is only stored once the Extraction comes back, and the whole
+    // capture runs first, so the modal is the sign that it is worth reading.
+    await expect(sourcePage.locator('.calendar-modal-overlay .event-card')).toHaveCount(1);
+    // The bar's own state, not toBeVisible: the section around it belongs to
+    // the popup's session handling, which flips to signed-out in this harness
+    // because the signedIn fixture leaves a second Supabase client running in
+    // the service worker.
+    await expect(popupPage.locator('#usageStats')).toHaveCSS('display', 'block');
     await expect(popupPage.locator('#usageText')).toHaveText(
       '31 / 50 requests used this month'
     );
@@ -102,6 +137,8 @@ test.describe('Screenshot Extraction (stub backend)', () => {
     await captureFromPopup(popupPage, sourcePage);
     await popupPage.locator('#captureScreenshotBtn').click();
 
+    // Not even an overlay to draw a second Region on.
+    await expect(sourcePage.locator(OVERLAY)).toHaveCount(0);
     const card = sourcePage.locator('.calendar-modal-overlay .event-card');
     await expect(card).toHaveCount(1);
     expect(stubBackend.requestsTo(PROCESS_IMAGE_PATH, 'POST')).toHaveLength(1);
@@ -164,7 +201,7 @@ test.describe('Screenshot Extraction (stub backend)', () => {
     );
   });
 
-  test('a page Chrome will not capture is reported in the popup', async ({
+  test('a page Chrome will not capture says so on the page', async ({
     context,
     extensionId,
     stubBackend,
@@ -173,12 +210,15 @@ test.describe('Screenshot Extraction (stub backend)', () => {
   }) => {
     // No stand-in here: the real chrome.tabs.captureVisibleTab refuses this
     // page for the same reason it refuses a browser-internal one — the
-    // extension is not allowed to capture it.
+    // extension is not allowed to capture it. By the time the Region is drawn
+    // the popup has closed, so the page is where the user is looking.
     const popupPage = await openPopup(context, extensionId);
 
     await captureFromPopup(popupPage, sourcePage);
 
-    await expect(popupPage.locator('#message')).toContainText('cannot be captured');
+    await expect(sourcePage.locator('.calendar-modal-overlay .extraction-error')).toContainText(
+      'cannot be captured'
+    );
     expect(stubBackend.requestsTo(PROCESS_IMAGE_PATH, 'POST')).toHaveLength(0);
   });
 

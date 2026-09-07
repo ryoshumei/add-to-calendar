@@ -166,18 +166,37 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     } else if (request.action === 'captureScreenshot') {
         // Screenshot trigger from the popup. The popup is not a tab, so the
         // active tab of the last focused window is the page the user is
-        // looking at.
+        // looking at. The trigger only opens the Region overlay; the capture
+        // happens once the user has drawn a Region there.
         console.log('📸 Received captureScreenshot request from popup');
 
         ensureAuthInitialized()
             .then(async () => {
                 const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
-                return handleScreenshotCapture(tab);
+                return startRegionCapture(tab);
             })
             .then(result => sendResponse(result))
             .catch(error => {
-                console.error('❌ Screenshot capture failed:', error);
+                console.error('❌ Could not start a Screenshot:', error);
                 sendResponse({ success: false, error: error.message, showInPopup: true });
+            });
+
+        return true; // Keep channel open for async response
+    } else if (request.action === 'regionDrawn') {
+        // The page reports the Region the user drew — null for the whole
+        // visible tab — and the device pixel ratio the capture will be in.
+        console.log('📸 Region drawn, capturing the tab');
+
+        ensureAuthInitialized()
+            .then(() => handleScreenshotCapture(
+                sender.tab,
+                request.region,
+                request.devicePixelRatio
+            ))
+            .then(result => sendResponse(result))
+            .catch(error => {
+                console.error('❌ Screenshot capture failed:', error);
+                sendResponse({ success: false, error: error.message });
             });
 
         return true; // Keep channel open for async response
@@ -283,37 +302,7 @@ async function handleContextMenuClick(info, tab) {
                 if (!apiKey) {
                     console.log('❌ No API key found - showing setup guidance');
                     await hideStatusMessage(tab.id);
-                    
-                    // Show modal with setup instructions instead of notification
-                    try {
-                        await chrome.tabs.sendMessage(tab.id, {
-                            type: "SHOW_SETUP_REQUIRED"
-                        });
-                        console.log('✅ Setup modal message sent');
-                    } catch (error) {
-                        console.log('⚠️ Content script not ready, injecting for setup modal...');
-                        // Try to inject content script and retry
-                        try {
-                            await chrome.scripting.executeScript({
-                                target: {tabId: tab.id},
-                                files: ['content.js']
-                            });
-                            await new Promise(resolve => setTimeout(resolve, 100));
-                            await chrome.tabs.sendMessage(tab.id, {
-                                type: "SHOW_SETUP_REQUIRED"
-                            });
-                            console.log('✅ Setup modal sent after injection');
-                        } catch (retryError) {
-                            // Fallback to notification if modal fails completely
-                            console.log('⚠️ Modal failed completely, using notification fallback');
-                            chrome.notifications.create({
-                                type: 'basic',
-                                iconUrl: 'icons/icon128.png',
-                                title: 'Setup Required',
-                                message: 'Please sign in with Google or set your OpenAI API key in extension settings'
-                            });
-                        }
-                    }
+                    await showSetupRequired(tab.id);
                     return;
                 }
 
@@ -339,7 +328,7 @@ async function handleContextMenuClick(info, tab) {
             // Try to send message to content script
             // eventDetails now contains { events: [...] } array structure
             try {
-                const response = await chrome.tabs.sendMessage(tab.id, {
+                const response = await sendToContentScript(tab.id, {
                     type: "SHOW_CONFIRMATION",
                     requestId,
                     events: eventDetails.events, // Send events array
@@ -350,31 +339,12 @@ async function handleContextMenuClick(info, tab) {
                 // If we get here, the content script handled the message
                 console.log('Content script handled message:', response);
             } catch (error) {
-                // If content script isn't ready, inject it
-                console.log('Injecting content script...');
-                await chrome.scripting.executeScript({
-                    target: {tabId: tab.id},
-                    files: ['content.js']
-                });
-
-                // Try sending the message again after a short delay
-                await new Promise(resolve => setTimeout(resolve, 100));
-
-                try {
-                    await chrome.tabs.sendMessage(tab.id, {
-                        type: "SHOW_CONFIRMATION",
-                        requestId,
-                        events: eventDetails.events, // Send events array
-                        calendarUrl: result.calendarUrl,
-                        result: result
-                    });
-                } catch (retryError) {
-                    // If it still fails, open calendar directly for first event
-                    if (result.calendarUrl) {
-                        chrome.tabs.create({url: result.calendarUrl});
-                    } else if (eventDetails.events && eventDetails.events.length > 0) {
-                        chrome.tabs.create({url: createGoogleCalendarUrl(eventDetails.events[0])});
-                    }
+                // The page cannot show the modal at all, so the first Event
+                // opens in Google Calendar directly instead.
+                if (result.calendarUrl) {
+                    chrome.tabs.create({url: result.calendarUrl});
+                } else if (eventDetails.events && eventDetails.events.length > 0) {
+                    chrome.tabs.create({url: createGoogleCalendarUrl(eventDetails.events[0])});
                 }
             }
         } catch (error) {
@@ -413,10 +383,35 @@ async function captureVisibleTab(tab) {
     return chrome.tabs.captureVisibleTab(tab.windowId, { format: 'png' });
 }
 
-// Turn the visible tab into a Screenshot and run one Extraction on it.
-// Returns what the popup should do about a failure: `showInPopup` marks the
-// errors the page itself cannot report, because nothing was ever captured.
-async function handleScreenshotCapture(tab) {
+// Open the Region overlay on the page and leave it there: the user draws a
+// Region, and the page reports it back for the capture. A page that cannot run
+// the overlay is a page Chrome would refuse to capture anyway, so that is
+// reported to the popup while it is still open to show it.
+async function startRegionCapture(tab) {
+    if (!tab) {
+        return { success: false, error: CANNOT_CAPTURE_MESSAGE, showInPopup: true };
+    }
+
+    // The same per-tab guard the Selection flow uses: a trigger while one
+    // Extraction is in flight is ignored rather than charged.
+    if (activeRequests.has(tab.id)) {
+        console.log('Request already in progress for this tab');
+        return { success: false, ignored: true };
+    }
+
+    try {
+        await sendToContentScript(tab.id, { type: 'SHOW_REGION_OVERLAY' });
+        return { success: true };
+    } catch (error) {
+        console.error('Could not open the Region overlay:', error);
+        return { success: false, error: CANNOT_CAPTURE_MESSAGE, showInPopup: true };
+    }
+}
+
+// Turn the Region of the visible tab into a Screenshot and run one Extraction
+// on it. The Region is in CSS pixels, or null for the whole visible tab; the
+// device pixel ratio is what the capture is measured in.
+async function handleScreenshotCapture(tab, region = null, devicePixelRatio = 1) {
     if (!tab) {
         return { success: false, error: CANNOT_CAPTURE_MESSAGE, showInPopup: true };
     }
@@ -451,8 +446,11 @@ async function handleScreenshotCapture(tab) {
             // extension draws on the page would otherwise be in the Screenshot.
             capture = await captureVisibleTab(tab);
         } catch (error) {
+            // By now the popup the user triggered from has closed, so this is
+            // reported where they are looking: the page.
             console.error('Could not capture the visible tab:', error);
-            return { success: false, error: CANNOT_CAPTURE_MESSAGE, showInPopup: true };
+            await showExtractionError(tab.id, CANNOT_CAPTURE_MESSAGE);
+            return { success: false, error: CANNOT_CAPTURE_MESSAGE };
         }
 
         await sendStatusMessage(
@@ -462,9 +460,11 @@ async function handleScreenshotCapture(tab) {
         );
 
         try {
-            // No Region yet: the whole visible tab is the Region, so there is
-            // nothing to scale by the device pixel ratio.
-            const screenshot = await SCREENSHOT_PIPELINE.buildScreenshotDataUrl(capture, null, 1);
+            const screenshot = await SCREENSHOT_PIPELINE.buildScreenshotDataUrl(
+                capture,
+                region,
+                devicePixelRatio
+            );
 
             const eventDetails = apiKey
                 ? await processImageWithOpenAI(screenshot, apiKey)
@@ -516,31 +516,16 @@ async function sendToContentScript(tabId, message) {
 async function sendStatusMessage(tabId, message, detail = '') {
     console.log('📤 Sending status message:', message, detail);
     try {
-        await chrome.tabs.sendMessage(tabId, {
+        await sendToContentScript(tabId, {
             type: "SHOW_STATUS",
             message: message,
             detail: detail
         });
         console.log('✅ Status message sent successfully');
     } catch (error) {
-        console.log('⚠️ Content script not ready, injecting...', error.message);
-        // Inject content script if not loaded
-        try {
-            await chrome.scripting.executeScript({
-                target: {tabId: tabId},
-                files: ['content.js']
-            });
-            console.log('✅ Content script injected');
-            await new Promise(resolve => setTimeout(resolve, 100));
-            await chrome.tabs.sendMessage(tabId, {
-                type: "SHOW_STATUS",
-                message: message,
-                detail: detail
-            });
-            console.log('✅ Status message sent after injection');
-        } catch (e) {
-            console.error('❌ Failed to show status message:', e);
-        }
+        // A page that cannot show progress can still show the result, so this
+        // is as far as it goes.
+        console.error('❌ Failed to show status message:', error);
     }
 }
 

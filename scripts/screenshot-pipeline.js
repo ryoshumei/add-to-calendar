@@ -63,18 +63,26 @@
     // The Region is in CSS pixels and the capture is in device pixels, so on a
     // Retina display the Region has to be scaled up to land on the same
     // content. No Region means the whole visible tab.
+    //
+    // A Region dragged past the edge of the window is kept inside the capture:
+    // beyond the edge there is nothing to crop, and drawing it anyway would put
+    // a black band in the Screenshot.
     function toCaptureRect(region, devicePixelRatio, capture) {
         if (!region) {
             return { x: 0, y: 0, width: capture.width, height: capture.height };
         }
 
         const ratio = devicePixelRatio > 0 ? devicePixelRatio : 1;
-        return {
-            x: Math.round(region.x * ratio),
-            y: Math.round(region.y * ratio),
-            width: Math.round(region.width * ratio),
-            height: Math.round(region.height * ratio)
-        };
+        const left = clamp(Math.round(region.x * ratio), 0, capture.width - 1);
+        const top = clamp(Math.round(region.y * ratio), 0, capture.height - 1);
+        const right = clamp(Math.round((region.x + region.width) * ratio), left + 1, capture.width);
+        const bottom = clamp(Math.round((region.y + region.height) * ratio), top + 1, capture.height);
+
+        return { x: left, y: top, width: right - left, height: bottom - top };
+    }
+
+    function clamp(value, lowest, highest) {
+        return Math.min(Math.max(value, lowest), highest);
     }
 
     function blobToDataUrl(blob) {
