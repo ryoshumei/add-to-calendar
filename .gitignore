@@ -84,3 +84,10 @@ test-results/
 claudedocs/
 docs/README.md
 TODO.md
+
+# Agent workflow config (local only, not published)
+CLAUDE.local.md
+CONTEXT.md
+docs/agents/
+docs/adr/
+.claude/worktrees/
