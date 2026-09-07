@@ -148,11 +148,6 @@ h2 {
     background-color: #3367d6;
 }
 
-.capture-btn:disabled {
-    background-color: #a8c4f7;
-    cursor: default;
-}
-
 /* Authentication Section */
 .auth-section {
     display: flex;
