@@ -7,6 +7,7 @@ const CONFIG = {
     // Edge Functions (backend service endpoints)
     EDGE_FUNCTIONS: {
         PROCESS_TEXT: 'https://pahcnlwgtghsctbnedhx.supabase.co/functions/v1/process-text',
+        PROCESS_IMAGE: 'https://pahcnlwgtghsctbnedhx.supabase.co/functions/v1/process-image',
         CREATE_CALENDAR_EVENT: 'https://pahcnlwgtghsctbnedhx.supabase.co/functions/v1/create-calendar-event'
     },
 

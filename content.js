@@ -236,6 +236,18 @@ style.textContent = `
     color: #202124;
 }
 
+/* Thumbnail of the screenshot the events were read from */
+.screenshot-thumbnail {
+    display: block;
+    width: 100%;
+    max-height: 150px;
+    object-fit: contain;
+    margin: 0 0 12px 0;
+    border: 1px solid #e0e0e0;
+    border-radius: 6px;
+    background-color: #f8f9fa;
+}
+
 /* Multi-event modal styles */
 .events-list {
     max-height: 400px;
@@ -486,7 +498,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             return;
         }
 
-        showConfirmationModal(events, message.calendarUrl);
+        showConfirmationModal(events, message.calendarUrl, message.screenshot);
     } else if (message.type === "ERROR") {
         showError(message.message);
     } else if (message.type === "SHOW_STATUS") {
@@ -769,8 +781,10 @@ function showSetupRequiredModal() {
     }, 30000);
 }
 
-// Display the confirmation modal for event creation (supports multiple events)
-function showConfirmationModal(events, fallbackCalendarUrl) {
+// Display the confirmation modal for event creation (supports multiple events).
+// `screenshot` is the data URL of the Screenshot the Events were read from,
+// shown as a thumbnail; a Selection has none.
+function showConfirmationModal(events, fallbackCalendarUrl, screenshot) {
     // Remove any existing modals first
     const existingModal = document.querySelector('.calendar-modal-overlay');
     if (existingModal) {
@@ -855,6 +869,18 @@ function showConfirmationModal(events, fallbackCalendarUrl) {
             </div>
         </div>
     `;
+
+    // The thumbnail is attached through the DOM, never interpolated into the
+    // template above: that template already carries model output.
+    if (screenshot) {
+        const thumbnail = document.createElement('img');
+        thumbnail.className = 'screenshot-thumbnail';
+        thumbnail.alt = 'The screenshot these events were read from';
+        thumbnail.src = screenshot;
+
+        const eventsList = modal.querySelector('.events-list');
+        eventsList.parentElement.insertBefore(thumbnail, eventsList);
+    }
 
     document.body.appendChild(modal);
 
