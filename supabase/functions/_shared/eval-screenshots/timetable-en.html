@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>DevCon Tokyo &mdash; Day 1 Schedule</title>
+<style>
+  body {
+    margin: 0;
+    padding: 36px;
+    background: #eef1f5;
+    font-family: "Helvetica Neue", Arial, sans-serif;
+    color: #16202c;
+  }
+  .sheet {
+    max-width: 760px;
+    margin: 0 auto;
+    background: #fff;
+    border-radius: 10px;
+    border: 1px solid #d5dbe3;
+    overflow: hidden;
+  }
+  header {
+    background: #16202c;
+    color: #fff;
+    padding: 28px 32px;
+  }
+  header h1 { margin: 0 0 8px; font-size: 30px; }
+  header .date { font-size: 21px; color: #9fb3c8; }
+  table { width: 100%; border-collapse: collapse; }
+  th {
+    text-align: left;
+    font-size: 15px;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    color: #6b7c8f;
+    padding: 18px 32px 10px;
+    border-bottom: 2px solid #e3e8ee;
+  }
+  td {
+    padding: 18px 32px;
+    font-size: 19px;
+    border-bottom: 1px solid #e9edf2;
+    vertical-align: top;
+  }
+  td.time { white-space: nowrap; font-weight: 700; width: 190px; }
+  td.session .title { font-weight: 600; }
+  td.session .who { color: #62717f; font-size: 17px; margin-top: 4px; }
+  td.room { white-space: nowrap; color: #62717f; width: 130px; }
+  footer { padding: 20px 32px; font-size: 16px; color: #62717f; }
+</style>
+</head>
+<body>
+  <div class="sheet">
+    <header>
+      <h1>DevCon Tokyo &mdash; Day 1</h1>
+      <div class="date">Friday, July 24, 2026 &middot; Shibuya Conference Center</div>
+    </header>
+
+    <table>
+      <tr><th>Time</th><th>Session</th><th>Room</th></tr>
+      <tr>
+        <td class="time">09:30 &ndash; 10:30</td>
+        <td class="session">
+          <div class="title">Opening Keynote: Ship Smaller</div>
+          <div class="who">Dana Whitfield, CTO, Northwind</div>
+        </td>
+        <td class="room">Main Hall</td>
+      </tr>
+      <tr>
+        <td class="time">11:00 &ndash; 12:00</td>
+        <td class="session">
+          <div class="title">Scaling Postgres to 10M Users</div>
+          <div class="who">Ren Takahashi</div>
+        </td>
+        <td class="room">Room 2</td>
+      </tr>
+      <tr>
+        <td class="time">13:30 &ndash; 15:00</td>
+        <td class="session">
+          <div class="title">Workshop: Testing at the Seams</div>
+          <div class="who">Marta Lindqvist</div>
+        </td>
+        <td class="room">Room 3</td>
+      </tr>
+    </table>
+
+    <footer>Badge pickup is in the lobby, before the first session.</footer>
+  </div>
+</body>
+</html>

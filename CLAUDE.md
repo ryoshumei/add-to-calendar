@@ -147,6 +147,18 @@ OPENAI_API_KEY=sk-... npm run eval:prompt
 - Bless improvements explicitly: `npm run eval:judge -- --update-baseline`, then commit the baseline
 - Tier 1 (`eval:prompt`) is the hard pre-deploy gate; Tier 2 measures quality direction when tuning prompts or comparing models
 
+**Screenshot tier — live image extraction** (`npm run eval:screenshot`):
+```bash
+OPENAI_API_KEY=sk-... npm run eval:screenshot
+```
+- Same shape as the text tier, for a Screenshot Source: `LLM_CONFIG.buildImageRequestBody` → chat/completions → `parseEventResponse` → the same `assertEventsMatch` expectations
+- Cases live in `supabase/functions/_shared/eval-screenshot-cases.ts`; each names an HTML fixture in `eval-screenshots/` (invite email, poster, timetable × en/ja). **No images are committed** — Playwright renders each fixture to PNG at run time via `scripts/render-eval-screenshots.js`
+- Needs `npm ci` and `npx playwright install chromium`; Japanese fixtures need CJK fonts on the machine
+- Skipped without `OPENAI_API_KEY`; never runs in CI (live API, costs money, nondeterministic)
+- **Run before deploying any change to the LLM prompt or model**, alongside `eval:prompt` — a full run is 6 vision calls, well under $0.01 on gpt-4.1-mini
+- Case metadata (fixtures exist, both languages per category, nothing binary committed) is checked in the regular Deno suite (`eval-screenshot-cases.test.ts`); that the fixtures still render to a non-blank PNG is checked in the Playwright suite (`tests/eval-screenshot-render.test.js`)
+- The judge tier (Tier 2) stays text-only
+
 ### Debugging
 - **Background script**: chrome://extensions/ → Extension details → "service worker" link
 - **Content script**: F12 on any webpage → Console tab (content.js logs appear here)
@@ -220,7 +232,7 @@ if (currentUser && supabaseAuth?.isAuthenticated()) {
 - `host_permissions`: Supabase API access (https://*.supabase.co/*)
 
 ### Common Modifications
-- **LLM Prompt / Model**: Edit `scripts/llm-prompt.js` (client-side) and `supabase/functions/_shared/llm-prompt.ts` (backend) — these must be kept in sync (CI enforces byte-identical prompts via `tests/llm-prompt-sync.test.js`). Run `npm run eval:prompt` before deploying prompt changes
+- **LLM Prompt / Model**: Edit `scripts/llm-prompt.js` (client-side) and `supabase/functions/_shared/llm-prompt.ts` (backend) — these must be kept in sync (CI enforces byte-identical prompts via `tests/llm-prompt-sync.test.js`). Run `npm run eval:prompt` and `npm run eval:screenshot` before deploying prompt changes
 - **UI Styling**: Edit CSS in content.js:8-72 for modal appearance
 - **Supabase Config**: Update SUPABASE_URL and SUPABASE_ANON_KEY in config.js
 - **OAuth Client**: Update oauth2.client_id in manifest.json (requires new Google Cloud OAuth app)
