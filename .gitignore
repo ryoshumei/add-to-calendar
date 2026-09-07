@@ -91,3 +91,4 @@ CONTEXT.md
 docs/agents/
 docs/adr/
 .claude/worktrees/
+.worktreeinclude
