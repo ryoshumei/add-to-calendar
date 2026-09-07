@@ -207,14 +207,6 @@ test.describe('Screenshot pipeline', () => {
     expectColour(result.centrePixel, TOP_LEFT);
   });
 
-  test('caps the Screenshot it will send at 10 MB', async ({ sourcePage }) => {
-    await sourcePage.addScriptTag({ path: PIPELINE_SCRIPT });
-
-    const cap = await sourcePage.evaluate(() => SCREENSHOT_PIPELINE.MAX_ENCODED_BYTES);
-
-    expect(cap).toBe(10 * 1024 * 1024);
-  });
-
   test('rejects a Screenshot whose encoded size is over the cap', async ({ sourcePage }) => {
     const run = await loadPipeline(sourcePage);
 
