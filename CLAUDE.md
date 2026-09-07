@@ -126,9 +126,17 @@ npm install:deps          # Install browser system dependencies
 
 ### Test Organization
 - `tests/*.test.js`: Test suites (extension-loading, popup-ui, context-menu, calendar-integration, etc.)
-- `tests/fixtures/`: Reusable test fixtures (extension-fixtures.js provides context, extensionId, popupPage, testPage)
+- `tests/fixtures/`: Reusable test fixtures (extension-fixtures.js provides context, extensionId, popupPage, testPage, stubBackend, sourcePage, signedIn)
 - `tests/utils/`: Test helper utilities
 - **Configuration**: playwright.config.js defines test settings, reporters (HTML, JSON, list)
+
+### Stub-Backend Harness (end-to-end without the real backend)
+`tests/fixtures/stub-backend.js` runs a local HTTP server that answers the Supabase auth endpoint and the Edge Functions, records every request (headers and body), and serves the page a test drives a Selection from. It costs nothing and touches no network.
+
+- `stubBackend` fixture: starts/stops the server; `stub.events` and `stub.usage` are the canned answers, `stub.requestsTo(pathname, method)` the assertions
+- `signedIn` fixture: writes the stub's base URL to `backend_base_url_override` and a session to `supabase_session` in `chrome.storage.local`, then re-runs `initializeAuth()` so the service worker picks both up
+- `scripts/backend-config.js`: resolves those URLs. **With no override stored — every real install — the production URLs in config.js are used unchanged**; the extension never writes that key itself
+- Example: `tests/selection-extraction.test.js` (trigger → backend request → confirmation modal → popup usage bar)
 
 ### Prompt Evals (live LLM, opt-in)
 Real-text extraction cases run against the actual prompt + parser via OpenAI:
