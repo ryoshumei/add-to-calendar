@@ -12,7 +12,6 @@
 import {
   test,
   expect,
-  openPopup,
   standInForCapture,
   captureFromPopup,
 } from './fixtures/extension-fixtures.js';
@@ -30,9 +29,7 @@ test.describe('Screenshot Extraction (own OpenAI key)', () => {
   }) => {
     const [serviceWorker] = context.serviceWorkers();
     await standInForCapture(context, sourcePage, { width: 2400, height: 1200 });
-    const popupPage = await openPopup(context, extensionId);
-
-    await captureFromPopup(popupPage, sourcePage);
+    await captureFromPopup(context, extensionId, sourcePage);
 
     const card = sourcePage.locator('.calendar-modal-overlay .event-card');
     await expect(card).toHaveCount(1);
@@ -73,9 +70,7 @@ test.describe('Screenshot Extraction (own OpenAI key)', () => {
     ownKey,
   }) => {
     await standInForCapture(context, sourcePage);
-    const popupPage = await openPopup(context, extensionId);
-
-    await captureFromPopup(popupPage, sourcePage);
+    await captureFromPopup(context, extensionId, sourcePage);
 
     await expect(sourcePage.locator('.calendar-modal-overlay .event-card')).toHaveCount(1);
     expect(stubBackend.requestsTo(OPENAI_PATH, 'POST')).toHaveLength(1);
@@ -90,9 +85,7 @@ test.describe('Screenshot Extraction (own OpenAI key)', () => {
     stubbedEndpoints,
   }) => {
     await standInForCapture(context, sourcePage);
-    const popupPage = await openPopup(context, extensionId);
-
-    await captureFromPopup(popupPage, sourcePage);
+    await captureFromPopup(context, extensionId, sourcePage);
 
     await expect(
       sourcePage.locator('.calendar-modal-overlay .status-modal.error h3')
@@ -119,9 +112,7 @@ test.describe('Screenshot Extraction (own OpenAI key)', () => {
       }) +
       '\n```';
     await standInForCapture(context, sourcePage);
-    const popupPage = await openPopup(context, extensionId);
-
-    await captureFromPopup(popupPage, sourcePage);
+    await captureFromPopup(context, extensionId, sourcePage);
 
     const card = sourcePage.locator('.calendar-modal-overlay .event-card');
     await expect(card).toHaveCount(1);
@@ -137,9 +128,7 @@ test.describe('Screenshot Extraction (own OpenAI key)', () => {
   }) => {
     stubBackend.openAiContent = '';
     await standInForCapture(context, sourcePage);
-    const popupPage = await openPopup(context, extensionId);
-
-    await captureFromPopup(popupPage, sourcePage);
+    await captureFromPopup(context, extensionId, sourcePage);
 
     await expect(
       sourcePage.locator('.calendar-modal-overlay .no-events-message')
@@ -160,9 +149,7 @@ test.describe('Screenshot Extraction (own OpenAI key)', () => {
       events: [{ title: 'Stubbed Half An Event', startTime: '2026-03-04T19:00:00' }],
     });
     await standInForCapture(context, sourcePage);
-    const popupPage = await openPopup(context, extensionId);
-
-    await captureFromPopup(popupPage, sourcePage);
+    await captureFromPopup(context, extensionId, sourcePage);
 
     await expect(sourcePage.locator('.calendar-modal-overlay .extraction-error')).toBeVisible();
     await expect(sourcePage.locator('.calendar-modal-overlay .event-card')).toHaveCount(0);
@@ -180,9 +167,7 @@ test.describe('Screenshot Extraction (own OpenAI key)', () => {
       body: { error: { message: 'Incorrect API key provided: sk-stub***.' } },
     };
     await standInForCapture(context, sourcePage);
-    const popupPage = await openPopup(context, extensionId);
-
-    await captureFromPopup(popupPage, sourcePage);
+    await captureFromPopup(context, extensionId, sourcePage);
 
     await expect(sourcePage.locator('.calendar-modal-overlay .extraction-error')).toContainText(
       'Incorrect API key provided'

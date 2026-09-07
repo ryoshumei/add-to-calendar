@@ -14,6 +14,7 @@ import {
   expect,
   openPopup,
   standInForCapture,
+  triggerCapture,
   captureFromPopup,
   imageSize,
   DEFAULT_REGION,
@@ -35,9 +36,7 @@ test.describe('Screenshot Extraction (stub backend)', () => {
       () => chrome.runtime.getManifest().version
     );
     await standInForCapture(context, sourcePage, { width: 2400, height: 1200 });
-    const popupPage = await openPopup(context, extensionId);
-
-    await captureFromPopup(popupPage, sourcePage);
+    await captureFromPopup(context, extensionId, sourcePage);
 
     const card = sourcePage.locator('.calendar-modal-overlay .event-card');
     await expect(card).toHaveCount(1);
@@ -60,9 +59,7 @@ test.describe('Screenshot Extraction (stub backend)', () => {
   }) => {
     // A capture the size a real one would be: the viewport in device pixels.
     await standInForCapture(context, sourcePage);
-    const popupPage = await openPopup(context, extensionId);
-
-    await captureFromPopup(popupPage, sourcePage, DEFAULT_REGION);
+    await captureFromPopup(context, extensionId, sourcePage, DEFAULT_REGION);
 
     await expect(sourcePage.locator('.calendar-modal-overlay .event-card')).toHaveCount(1);
     const [post] = stubBackend.requestsTo(PROCESS_IMAGE_PATH, 'POST');
@@ -84,9 +81,7 @@ test.describe('Screenshot Extraction (stub backend)', () => {
     signedIn,
   }) => {
     await standInForCapture(context, sourcePage);
-    const popupPage = await openPopup(context, extensionId);
-
-    await captureFromPopup(popupPage, sourcePage);
+    await captureFromPopup(context, extensionId, sourcePage);
 
     const thumbnail = sourcePage.locator('.calendar-modal-overlay .screenshot-thumbnail');
     await expect(thumbnail).toBeVisible();
@@ -104,18 +99,17 @@ test.describe('Screenshot Extraction (stub backend)', () => {
   }) => {
     stubBackend.usage = { usageCount: 31, limit: 50, yearMonth: '2026-03' };
     await standInForCapture(context, sourcePage);
-    const popupPage = await openPopup(context, extensionId);
-
-    await captureFromPopup(popupPage, sourcePage);
+    await captureFromPopup(context, extensionId, sourcePage);
 
     // The usage is only stored once the Extraction comes back, and the whole
     // capture runs first, so the modal is the sign that it is worth reading.
     await expect(sourcePage.locator('.calendar-modal-overlay .event-card')).toHaveCount(1);
-    // The bar's own state, not toBeVisible: the section around it belongs to
-    // the popup's session handling, which flips to signed-out in this harness
-    // because the signedIn fixture leaves a second Supabase client running in
-    // the service worker.
-    await expect(popupPage.locator('#usageStats')).toHaveCSS('display', 'block');
+
+    // The popup closed itself to get out of the way of the drag, so looking at
+    // what is left of the allowance means opening it again, as a user would.
+    const popupPage = await openPopup(context, extensionId);
+    await expect(popupPage.locator('#userSection')).toBeVisible();
+    await expect(popupPage.locator('#usageStats')).toBeVisible();
     await expect(popupPage.locator('#usageText')).toHaveText(
       '31 / 50 requests used this month'
     );
@@ -132,10 +126,10 @@ test.describe('Screenshot Extraction (stub backend)', () => {
     // Extraction is still in flight.
     stubBackend.responseDelayMs = 750;
     await standInForCapture(context, sourcePage);
-    const popupPage = await openPopup(context, extensionId);
-
-    await captureFromPopup(popupPage, sourcePage);
-    await popupPage.locator('#captureScreenshotBtn').click();
+    await captureFromPopup(context, extensionId, sourcePage);
+    // The first trigger closed the popup behind it, so a second one is a
+    // second visit to the toolbar.
+    await triggerCapture(context, extensionId, sourcePage);
 
     // Not even an overlay to draw a second Region on.
     await expect(sourcePage.locator(OVERLAY)).toHaveCount(0);
@@ -153,9 +147,7 @@ test.describe('Screenshot Extraction (stub backend)', () => {
   }) => {
     stubBackend.imageResponse = { status: 401, body: { error: 'Invalid JWT' } };
     await standInForCapture(context, sourcePage);
-    const popupPage = await openPopup(context, extensionId);
-
-    await captureFromPopup(popupPage, sourcePage);
+    await captureFromPopup(context, extensionId, sourcePage);
 
     const authModal = sourcePage.locator('.calendar-modal-overlay .status-modal.error');
     await expect(authModal).toContainText('Session expired. Please sign in again with Google.');
@@ -173,9 +165,7 @@ test.describe('Screenshot Extraction (stub backend)', () => {
     const limitMessage = 'Monthly limit exceeded (50/50). Resets on 2026-04-01.';
     stubBackend.imageResponse = { status: 429, body: { error: limitMessage } };
     await standInForCapture(context, sourcePage);
-    const popupPage = await openPopup(context, extensionId);
-
-    await captureFromPopup(popupPage, sourcePage);
+    await captureFromPopup(context, extensionId, sourcePage);
 
     await expect(sourcePage.locator('.calendar-modal-overlay .extraction-error')).toContainText(
       limitMessage
@@ -192,9 +182,7 @@ test.describe('Screenshot Extraction (stub backend)', () => {
   }) => {
     stubBackend.events = [];
     await standInForCapture(context, sourcePage);
-    const popupPage = await openPopup(context, extensionId);
-
-    await captureFromPopup(popupPage, sourcePage);
+    await captureFromPopup(context, extensionId, sourcePage);
 
     await expect(sourcePage.locator('.calendar-modal-overlay .no-events-message')).toContainText(
       'screenshot'
@@ -212,9 +200,7 @@ test.describe('Screenshot Extraction (stub backend)', () => {
     // page for the same reason it refuses a browser-internal one — the
     // extension is not allowed to capture it. By the time the Region is drawn
     // the popup has closed, so the page is where the user is looking.
-    const popupPage = await openPopup(context, extensionId);
-
-    await captureFromPopup(popupPage, sourcePage);
+    await captureFromPopup(context, extensionId, sourcePage);
 
     await expect(sourcePage.locator('.calendar-modal-overlay .extraction-error')).toContainText(
       'cannot be captured'
@@ -229,9 +215,7 @@ test.describe('Screenshot Extraction (stub backend)', () => {
     sourcePage,
   }) => {
     await standInForCapture(context, sourcePage);
-    const popupPage = await openPopup(context, extensionId);
-
-    await captureFromPopup(popupPage, sourcePage);
+    await captureFromPopup(context, extensionId, sourcePage);
 
     await expect(sourcePage.locator('.calendar-modal-overlay .status-modal.error h3')).toContainText(
       'Setup Required'

@@ -131,8 +131,9 @@ npm run test:backend       # deno test supabase/functions/_shared/ — needs no 
 Keep these permission-free: anything that must touch the filesystem belongs in the Playwright suite, so the obvious flagless `deno test` command stays green.
 
 ### Test Organization
-- `tests/*.test.js`: Test suites — `configuration`, `llm-prompt`, `llm-prompt-sync`, `selection-extraction`, `screenshot-pipeline`, `region-overlay`, `screenshot-extraction`, `screenshot-key-path`, `eval-screenshot-render`
-- `tests/fixtures/`: Reusable test fixtures (extension-fixtures.js provides context, extensionId, popupPage, testPage, stubBackend, sourcePage, stubbedEndpoints, signedIn, ownKey, plus the helpers that drive a Selection, the popup trigger and a Region)
+- `tests/*.test.js`: Test suites — `configuration`, `llm-prompt`, `llm-prompt-sync`, `selection-extraction`, `screenshot-pipeline`, `region-overlay`, `screenshot-extraction`, `screenshot-key-path`, `context-menu`, `eval-screenshot-render`
+- `tests/fixtures/`: Reusable test fixtures (extension-fixtures.js provides context, extensionId, popupPage, testPage, stubBackend, sourcePage, stubbedEndpoints, signedIn, ownKey, plus the helpers that drive a Selection, the popup trigger, a Region and a context-menu click)
+- Playwright cannot open a native context menu, so a menu item is driven through `handleContextMenuClick` in the service worker (`clickMenuItem`) and its presence is asked of Chrome with `chrome.contextMenus.update` (`menuItemExists`), which fails for an item Chrome does not have
 - **Configuration**: playwright.config.js defines test settings, reporters (HTML, JSON, list)
 
 ### Stub-Backend Harness (end-to-end without the real backend)

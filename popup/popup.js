@@ -3,6 +3,11 @@
 // Global variables for authentication
 let supabaseAuth = null;
 
+// Whether the right-click item for a Screenshot is on the menu. Sync storage,
+// next to the API key, so the choice follows the user's Chrome profile. The
+// service worker reads the same key when it builds the menu.
+const SCREENSHOT_MENU_ITEM_SETTING = 'showScreenshotMenuItem';
+
 document.addEventListener('DOMContentLoaded', async () => {
     // DOM elements
     const apiKeyInput = document.getElementById('apiKey');
@@ -13,6 +18,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // Screenshot capture
     const captureScreenshotBtn = document.getElementById('captureScreenshotBtn');
+    const screenshotMenuToggle = document.getElementById('screenshotMenuToggle');
 
     // Authentication elements
     const googleSignInBtn = document.getElementById('googleSignInBtn');
@@ -55,6 +61,21 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Screenshot capture event listener
     if (captureScreenshotBtn) {
         captureScreenshotBtn.addEventListener('click', handleCaptureScreenshot);
+    }
+
+    // The right-click item is optional; the service worker rebuilds its menu
+    // when this lands in storage, so nothing here has to ask it to.
+    if (screenshotMenuToggle) {
+        loadScreenshotMenuSetting(screenshotMenuToggle);
+        screenshotMenuToggle.addEventListener('change', async () => {
+            try {
+                await chrome.storage.sync.set({
+                    [SCREENSHOT_MENU_ITEM_SETTING]: screenshotMenuToggle.checked
+                });
+            } catch (error) {
+                showMessage('Could not save that setting: ' + error.message, 'error');
+            }
+        });
     }
 
     // Authentication event listeners
@@ -146,6 +167,14 @@ async function handleCaptureScreenshot() {
     try {
         const response = await chrome.runtime.sendMessage({ action: 'captureScreenshot' });
         console.log('📸 Capture response:', response);
+
+        if (response && response.success) {
+            // The popup floats over the page the overlay just opened on, so it
+            // has to go: left up, the user's first mousedown would dismiss the
+            // popup instead of starting the drag.
+            window.close();
+            return;
+        }
 
         if (response && !response.success && response.showInPopup) {
             showMessage(response.error, 'error');
@@ -281,6 +310,21 @@ function updateAuthUI() {
         // Show login section, hide user section
         loginSection.style.display = 'block';
         userSection.style.display = 'none';
+    }
+}
+
+// Show the toggle what the setting currently is. On by default, so a user who
+// has never touched it sees the item they have on their menu.
+async function loadScreenshotMenuSetting(toggle) {
+    try {
+        const stored = await chrome.storage.sync.get({
+            [SCREENSHOT_MENU_ITEM_SETTING]: true
+        });
+        toggle.checked = stored[SCREENSHOT_MENU_ITEM_SETTING] !== false;
+    } catch (error) {
+        console.error('Could not read the right-click menu setting:', error);
+    } finally {
+        toggle.disabled = false;
     }
 }
 

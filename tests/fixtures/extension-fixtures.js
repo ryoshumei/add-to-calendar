@@ -80,16 +80,26 @@ const test = base.extend({
   },
 
   // Seeds a session, using the same storage key the auth client persists, then
-  // re-runs the service worker's auth start-up so it picks the session and the
-  // override up. After this the extension reports itself signed in and every
-  // backend call lands on the stub.
+  // restarts the service worker's auth so it picks the session and the
+  // override up. The worker builds one client and keeps it, so this is the
+  // fresh start a real worker would get — done here rather than by reloading
+  // the extension out from under Playwright. After this the extension reports
+  // itself signed in and every backend call lands on the stub.
   signedIn: async ({ context, stubbedEndpoints }, use) => {
     const [serviceWorker] = context.serviceWorkers();
     const session = buildStubSession();
 
     const authState = await serviceWorker.evaluate(async (session) => {
-      await chrome.storage.local.set({ supabase_session: session });
+      // Let the worker's own start-up settle first: it is aimed at the
+      // production project, and a restore landing there after the session is
+      // seeded would throw the seeded session away.
       await initializeAuth();
+
+      await chrome.storage.local.set({ supabase_session: session });
+      authStartUp = null;
+      supabaseAuth = null;
+      await initializeAuth();
+
       return {
         isAuthenticated: supabaseAuth?.isAuthenticated() ?? false,
         email: currentUser?.email ?? null,
@@ -210,14 +220,20 @@ async function waitForPopupReady(popupPage) {
   );
 }
 
-// Clicks "Capture screenshot" in the popup, which opens the Region overlay on
-// the page. The popup is a tab here, so the page under Extraction has to be
-// the front tab for the service worker to resolve it the way it resolves the
+// Opens the popup and clicks "Capture screenshot", which opens the Region
+// overlay on the page. The popup owns its whole life here because it closes
+// itself once the overlay is up, the way the real one does: a test that needs
+// the popup afterwards opens a fresh one, as the user would.
+//
+// The popup is a tab in this harness, so the page under Extraction is brought
+// to the front for the service worker to resolve it the way it resolves the
 // page under a real popup.
-async function triggerCapture(popupPage, sourcePage) {
+async function triggerCapture(context, extensionId, sourcePage) {
+  const popupPage = await openPopup(context, extensionId);
   await sourcePage.bringToFront();
   await waitForPopupReady(popupPage);
   await popupPage.locator('#captureScreenshotBtn').click();
+  return popupPage;
 }
 
 // Drags the Region the user would draw, in CSS pixels from the top left of the
@@ -238,10 +254,42 @@ const DEFAULT_REGION = { x: 60, y: 40, width: 320, height: 180 };
 
 // The whole trigger a user performs: the popup opens the overlay on the page,
 // and they drag a Region on it. Releasing the mouse starts the Extraction.
-async function captureFromPopup(popupPage, sourcePage, region = DEFAULT_REGION) {
-  await triggerCapture(popupPage, sourcePage);
+async function captureFromPopup(context, extensionId, sourcePage, region = DEFAULT_REGION) {
+  await triggerCapture(context, extensionId, sourcePage);
   await expect(sourcePage.locator('#calendar-region-overlay')).toBeVisible();
   await drawRegion(sourcePage, region);
+}
+
+// Clicks a context-menu item the way Chrome does: the service worker's
+// handler, given the front tab and whatever the user had highlighted.
+// Playwright cannot open a native context menu, so this is the seam.
+async function clickMenuItem(context, page, menuItemId) {
+  const [serviceWorker] = context.serviceWorkers();
+  await page.bringToFront();
+  const selectionText = await page.evaluate(() => window.getSelection().toString());
+
+  return serviceWorker.evaluate(async ({ id, text }) => {
+    const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+    await handleContextMenuClick({ menuItemId: id, selectionText: text }, tab);
+    return { tabId: tab.id };
+  }, { id: menuItemId, text: selectionText });
+}
+
+// Whether Chrome currently has this item in the extension's context menu.
+// There is no query API, but an update of an item Chrome does not have fails,
+// so this asks the registry the menu is actually drawn from rather than
+// watching what the extension told it.
+async function menuItemExists(context, menuItemId) {
+  const [serviceWorker] = context.serviceWorkers();
+
+  return serviceWorker.evaluate(async (id) => {
+    try {
+      await chrome.contextMenus.update(id, {});
+      return true;
+    } catch (error) {
+      return false;
+    }
+  }, menuItemId);
 }
 
 async function openPopup(context, extensionId) {
@@ -256,6 +304,8 @@ module.exports = {
   selectText,
   extractFromSelection,
   openPopup,
+  clickMenuItem,
+  menuItemExists,
   standInForCapture,
   capturesTaken,
   imageSize,

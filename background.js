@@ -18,18 +18,34 @@ let currentUser = null;
 // This ensures auth is ready when messages arrive
 console.log('🚀 Service worker starting, initializing auth...');
 
+// The worker's one and only start-up. Two auth clients in one worker is a
+// real bug rather than waste: each one listens for auth state changes and each
+// one restores the stored session, and whichever loses that race clears the
+// session out of storage on its way out — signing the user out from under the
+// client that won. The worker's own start-up, onInstalled, onStartup and every
+// wake-up all mean "make sure auth is ready", so they share this one.
+let authStartUp = null;
+
 // Initialize authentication on startup
-async function initializeAuth() {
+function initializeAuth() {
+    if (!authStartUp) {
+        authStartUp = startAuth();
+    }
+    return authStartUp;
+}
+
+async function startAuth() {
     try {
         console.log('🔄 Initializing authentication...');
-        supabaseAuth = new SupabaseAuth();
-        await supabaseAuth.initialize();
-        await supabaseAuth.restoreSession();
+        const auth = new SupabaseAuth();
+        await auth.initialize();
+        supabaseAuth = auth;
+        await auth.restoreSession();
 
-        calendarService = new CalendarService(supabaseAuth);
+        calendarService = new CalendarService(auth);
 
-        if (supabaseAuth.isAuthenticated()) {
-            currentUser = supabaseAuth.currentUser;
+        if (auth.isAuthenticated()) {
+            currentUser = auth.currentUser;
             console.log('✅ User authenticated:', currentUser?.email);
         } else {
             currentUser = null;
@@ -38,28 +54,67 @@ async function initializeAuth() {
         console.log('✅ Authentication initialized successfully');
     } catch (error) {
         console.error('❌ Failed to initialize authentication:', error);
+        // A failure is not remembered: the next caller starts auth again
+        // rather than leaving the worker without it for the rest of its life.
+        authStartUp = null;
     }
 }
 
 // Ensure authentication is initialized (for service worker wake-ups)
 async function ensureAuthInitialized() {
-    if (!supabaseAuth) {
-        console.log('⚠️ Auth not initialized, initializing now...');
-        await initializeAuth();
-    }
+    await initializeAuth();
     return supabaseAuth !== null;
 }
 
 // Initialize authentication immediately when service worker loads
 initializeAuth();
 
-// Create context menu when extension is installed
-chrome.runtime.onInstalled.addListener(() => {
+// The right-click item for a Screenshot is optional: a user who only ever
+// starts a capture from the popup can take it off the menu. Sync storage, next
+// to the API key, so the choice follows them across their Chrome profile.
+const SCREENSHOT_MENU_ITEM_SETTING = 'showScreenshotMenuItem';
+
+// Registering is remove-then-create rather than an incremental edit, so the
+// menu always ends up as the setting describes however it got here — install,
+// browser start, or the setting being flipped. Serialised, because two
+// registrations interleaving would try to create an id that already exists.
+let menuRegistration = Promise.resolve();
+
+function registerContextMenus() {
+    menuRegistration = menuRegistration
+        .then(applyContextMenus)
+        .catch(error => {
+            console.error('❌ Could not build the context menu:', error);
+        });
+    return menuRegistration;
+}
+
+async function applyContextMenus() {
+    const { [SCREENSHOT_MENU_ITEM_SETTING]: showScreenshotItem } =
+        await chrome.storage.sync.get({ [SCREENSHOT_MENU_ITEM_SETTING]: true });
+
+    await chrome.contextMenus.removeAll();
+
     chrome.contextMenus.create({
         id: "addToCalendar",
         title: "Add to Google Calendar",
         contexts: ["selection"]
     });
+
+    if (showScreenshotItem) {
+        // Every context, not just "page": a Screenshot is of the visible tab,
+        // so what the pointer happens to be over makes no difference to it.
+        chrome.contextMenus.create({
+            id: "addScreenshotToCalendar",
+            title: "Add screenshot to Google Calendar",
+            contexts: ["all"]
+        });
+    }
+}
+
+// Create context menu when extension is installed
+chrome.runtime.onInstalled.addListener(() => {
+    registerContextMenus();
 
     // Initialize authentication
     initializeAuth();
@@ -67,7 +122,16 @@ chrome.runtime.onInstalled.addListener(() => {
 
 // Handle startup
 chrome.runtime.onStartup.addListener(() => {
+    registerContextMenus();
     initializeAuth();
+});
+
+// The popup writes the setting; the menu it describes is the worker's to
+// build, so it is rebuilt here rather than on the next browser start.
+chrome.storage.onChanged.addListener((changes, namespace) => {
+    if (namespace === 'sync' && changes[SCREENSHOT_MENU_ITEM_SETTING]) {
+        registerContextMenus();
+    }
 });
 
 // Handle messages from popup
@@ -225,6 +289,26 @@ let activeRequests = new Set();
 chrome.contextMenus.onClicked.addListener((info, tab) => handleContextMenuClick(info, tab));
 
 async function handleContextMenuClick(info, tab) {
+    if (info.menuItemId === "addScreenshotToCalendar") {
+        // A Screenshot is one Source on its own: whatever the user had
+        // highlighted when they right-clicked plays no part in it.
+        await ensureAuthInitialized();
+        const result = await startRegionCapture(tab);
+
+        // No popup is open on this trigger, and the page that could not run
+        // the overlay cannot show a modal either, so this is the one surface
+        // left for saying why nothing happened.
+        if (result && !result.success && result.error) {
+            chrome.notifications.create({
+                type: 'basic',
+                iconUrl: 'icons/icon128.png',
+                title: 'Calendar Event Creator',
+                message: result.error
+            });
+        }
+        return;
+    }
+
     if (info.menuItemId === "addToCalendar") {
         // Generate a unique request ID using timestamp
         const requestId = `${tab.id}-${Date.now()}`;

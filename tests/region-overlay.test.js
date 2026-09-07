@@ -28,11 +28,11 @@ const WHOLE_TAB = { width: 1200, height: 800 };
 // afterwards settles it either way: the overlay still works, and the tab was
 // captured once — for this Region, not for the one that was dismissed.
 async function expectDismissedWithNothingCaptured(
-  { context, stubBackend, sourcePage, popupPage }
+  { context, extensionId, stubBackend, sourcePage }
 ) {
   await expect(sourcePage.locator(OVERLAY)).toHaveCount(0);
 
-  await captureFromPopup(popupPage, sourcePage);
+  await captureFromPopup(context, extensionId, sourcePage);
 
   await expect(sourcePage.locator('.calendar-modal-overlay .event-card')).toHaveCount(1);
   expect(await capturesTaken(context)).toBe(1);
@@ -69,14 +69,12 @@ async function holdTheCapture(context) {
 // corner the Region starts from.
 async function startDrawing(context, extensionId, sourcePage, from) {
   await standInForCapture(context, sourcePage);
-  const popupPage = await openPopup(context, extensionId);
-  await triggerCapture(popupPage, sourcePage);
+  await triggerCapture(context, extensionId, sourcePage);
   await expect(sourcePage.locator(OVERLAY)).toBeVisible();
 
   await sourcePage.bringToFront();
   await sourcePage.mouse.move(from.x, from.y);
   await sourcePage.mouse.down();
-  return popupPage;
 }
 
 test.describe('Region overlay', () => {
@@ -88,12 +86,28 @@ test.describe('Region overlay', () => {
     signedIn,
   }) => {
     await standInForCapture(context, sourcePage);
-    const popupPage = await openPopup(context, extensionId);
 
-    await triggerCapture(popupPage, sourcePage);
+    await triggerCapture(context, extensionId, sourcePage);
 
     await expect(sourcePage.locator(OVERLAY)).toBeVisible();
     expect(stubBackend.requestsTo(PROCESS_IMAGE_PATH, 'POST')).toHaveLength(0);
+  });
+
+  test('the popup gets out of the way once the overlay is open', async ({
+    context,
+    extensionId,
+    stubBackend,
+    sourcePage,
+    signedIn,
+  }) => {
+    await standInForCapture(context, sourcePage);
+
+    const popupPage = await triggerCapture(context, extensionId, sourcePage);
+
+    await expect(sourcePage.locator(OVERLAY)).toBeVisible();
+    // The real popup floats over the page: left open, the user's first
+    // mousedown dismisses the popup instead of starting the drag.
+    await expect.poll(() => popupPage.isClosed()).toBe(true);
   });
 
   test('the rectangle follows the pointer as the Region is drawn', async ({
@@ -129,12 +143,12 @@ test.describe('Region overlay', () => {
     sourcePage,
     signedIn,
   }) => {
-    const popupPage = await startDrawing(context, extensionId, sourcePage, { x: 120, y: 90 });
+    await startDrawing(context, extensionId, sourcePage, { x: 120, y: 90 });
     await sourcePage.mouse.move(320, 250);
 
     await sourcePage.keyboard.press('Escape');
 
-    await expectDismissedWithNothingCaptured({ context, stubBackend, sourcePage, popupPage });
+    await expectDismissedWithNothingCaptured({ context, extensionId, stubBackend, sourcePage });
   });
 
   test('Esc dismisses an overlay nothing has been drawn on', async ({
@@ -145,13 +159,12 @@ test.describe('Region overlay', () => {
     signedIn,
   }) => {
     await standInForCapture(context, sourcePage);
-    const popupPage = await openPopup(context, extensionId);
-    await triggerCapture(popupPage, sourcePage);
+    await triggerCapture(context, extensionId, sourcePage);
     await expect(sourcePage.locator(OVERLAY)).toBeVisible();
 
     await sourcePage.keyboard.press('Escape');
 
-    await expectDismissedWithNothingCaptured({ context, stubBackend, sourcePage, popupPage });
+    await expectDismissedWithNothingCaptured({ context, extensionId, stubBackend, sourcePage });
   });
 
   test('a drag under 10 px is a mis-click: it dismisses and captures nothing', async ({
@@ -161,12 +174,30 @@ test.describe('Region overlay', () => {
     sourcePage,
     signedIn,
   }) => {
-    const popupPage = await startDrawing(context, extensionId, sourcePage, { x: 200, y: 160 });
+    await startDrawing(context, extensionId, sourcePage, { x: 200, y: 160 });
 
     await sourcePage.mouse.move(207, 168);
     await sourcePage.mouse.up();
 
-    await expectDismissedWithNothingCaptured({ context, stubBackend, sourcePage, popupPage });
+    await expectDismissedWithNothingCaptured({ context, extensionId, stubBackend, sourcePage });
+  });
+
+  test('a mis-click leaves the overlay up long enough for a slow double-click', async ({
+    context,
+    extensionId,
+    stubBackend,
+    sourcePage,
+    signedIn,
+  }) => {
+    await startDrawing(context, extensionId, sourcePage, { x: 200, y: 160 });
+
+    // The first half of a double-click: a press and release that went nowhere.
+    await sourcePage.mouse.up();
+    // Chrome counts a second click up to about 500 ms later as a double-click,
+    // so the overlay has to outlive that gap for the whole tab to be sendable.
+    await sourcePage.waitForTimeout(400);
+
+    await expect(sourcePage.locator(OVERLAY)).toBeVisible();
   });
 
   test('Enter sends the whole visible tab', async ({
@@ -177,8 +208,7 @@ test.describe('Region overlay', () => {
     signedIn,
   }) => {
     await standInForCapture(context, sourcePage, WHOLE_TAB);
-    const popupPage = await openPopup(context, extensionId);
-    await triggerCapture(popupPage, sourcePage);
+    await triggerCapture(context, extensionId, sourcePage);
     await expect(sourcePage.locator(OVERLAY)).toBeVisible();
 
     await sourcePage.keyboard.press('Enter');
@@ -196,8 +226,7 @@ test.describe('Region overlay', () => {
     signedIn,
   }) => {
     await standInForCapture(context, sourcePage, WHOLE_TAB);
-    const popupPage = await openPopup(context, extensionId);
-    await triggerCapture(popupPage, sourcePage);
+    await triggerCapture(context, extensionId, sourcePage);
     await expect(sourcePage.locator(OVERLAY)).toBeVisible();
 
     // Each half of the double-click is a mis-click sized drag on its own, so
@@ -217,15 +246,14 @@ test.describe('Region overlay', () => {
     signedIn,
   }) => {
     await standInForCapture(context, sourcePage);
-    const popupPage = await openPopup(context, extensionId);
 
     // An earlier Extraction leaves its confirmation modal on the page, and it
     // would be in the next Screenshot as surely as the overlay would.
-    await captureFromPopup(popupPage, sourcePage);
+    await captureFromPopup(context, extensionId, sourcePage);
     await expect(sourcePage.locator('.calendar-modal-overlay .event-card')).toHaveCount(1);
 
     const capture = await holdTheCapture(context);
-    await triggerCapture(popupPage, sourcePage);
+    await triggerCapture(context, extensionId, sourcePage);
     await expect(sourcePage.locator(OVERLAY)).toBeVisible();
     await drawRegion(sourcePage, { x: 100, y: 120, width: 260, height: 160 });
     await capture.reached();

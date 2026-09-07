@@ -579,8 +579,9 @@ const MIN_REGION_PX = 10;
 // How long a mis-click waits before it dismisses the overlay. Each half of a
 // double-click is a mis-click on its own, so dismissing one straight away
 // would take the overlay away before the double-click that sends the whole
-// visible tab could arrive.
-const MISCLICK_DISMISS_MS = 300;
+// visible tab could arrive. Chrome counts two clicks up to about 500 ms apart
+// as a double-click, so a shorter wait than that loses the slow ones.
+const MISCLICK_DISMISS_MS = 500;
 
 // The layer currently on the page, with the listeners that tear it down.
 let regionOverlay = null;
