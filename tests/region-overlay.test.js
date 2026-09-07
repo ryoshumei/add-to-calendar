@@ -7,6 +7,7 @@ import {
   test,
   expect,
   openPopup,
+  waitForPopupReady,
   standInForCapture,
   capturesTaken,
   imageSize,
@@ -240,6 +241,26 @@ test.describe('Region overlay', () => {
 
     await capture.release();
     await expect(sourcePage.locator('.calendar-modal-overlay .event-card')).toHaveCount(1);
+  });
+
+  test('a page the overlay cannot open on is reported in the popup', async ({
+    context,
+    extensionId,
+    stubBackend,
+    signedIn,
+  }) => {
+    // A browser page: Chrome runs no content script here, and would refuse to
+    // capture it either way. The popup is still open, so it says so.
+    const browserPage = await context.newPage();
+    await browserPage.goto('chrome://version');
+    const popupPage = await openPopup(context, extensionId);
+
+    await browserPage.bringToFront();
+    await waitForPopupReady(popupPage);
+    await popupPage.locator('#captureScreenshotBtn').click();
+
+    await expect(popupPage.locator('#message')).toContainText('cannot be captured');
+    expect(stubBackend.requestsTo(PROCESS_IMAGE_PATH, 'POST')).toHaveLength(0);
   });
 
   test('a Region drawn towards the top left is the same rectangle', async ({

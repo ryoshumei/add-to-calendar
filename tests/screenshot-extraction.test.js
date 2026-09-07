@@ -123,7 +123,11 @@ test.describe('Screenshot Extraction (stub backend)', () => {
     // The usage is only stored once the Extraction comes back, and the whole
     // capture runs first, so the modal is the sign that it is worth reading.
     await expect(sourcePage.locator('.calendar-modal-overlay .event-card')).toHaveCount(1);
-    await expect(popupPage.locator('#usageStats')).toBeVisible();
+    // The bar's own state, not toBeVisible: the section around it belongs to
+    // the popup's session handling, which flips to signed-out in this harness
+    // because the signedIn fixture leaves a second Supabase client running in
+    // the service worker.
+    await expect(popupPage.locator('#usageStats')).toHaveCSS('display', 'block');
     await expect(popupPage.locator('#usageText')).toHaveText(
       '31 / 50 requests used this month'
     );

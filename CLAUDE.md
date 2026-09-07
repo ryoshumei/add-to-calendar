@@ -131,9 +131,8 @@ npm run test:backend       # deno test supabase/functions/_shared/ — needs no 
 Keep these permission-free: anything that must touch the filesystem belongs in the Playwright suite, so the obvious flagless `deno test` command stays green.
 
 ### Test Organization
-- `tests/*.test.js`: Test suites (extension-loading, popup-ui, context-menu, calendar-integration, etc.)
-- `tests/fixtures/`: Reusable test fixtures (extension-fixtures.js provides context, extensionId, popupPage, testPage, stubBackend, sourcePage, signedIn)
-- `tests/utils/`: Test helper utilities
+- `tests/*.test.js`: Test suites — `configuration`, `llm-prompt`, `llm-prompt-sync`, `selection-extraction`, `screenshot-pipeline`, `region-overlay`, `screenshot-extraction`, `eval-screenshot-render`
+- `tests/fixtures/`: Reusable test fixtures (extension-fixtures.js provides context, extensionId, popupPage, testPage, stubBackend, sourcePage, signedIn, plus the helpers that drive a Selection, the popup trigger and a Region)
 - **Configuration**: playwright.config.js defines test settings, reporters (HTML, JSON, list)
 
 ### Stub-Backend Harness (end-to-end without the real backend)
