@@ -129,6 +129,63 @@ async function extractFromSelection(context, page) {
   }, selectionText);
 }
 
+// Stands in for chrome.tabs.captureVisibleTab, which needs the activeTab grant
+// Chrome only gives on a real toolbar click. The image is drawn at the size a
+// real capture of this page would be — the viewport in device pixels — so a
+// Region in CSS pixels crops out of it the way it would in production.
+async function standInForCapture(context, page, size = null) {
+  const captureDataUrl = await page.evaluate((size) => {
+    const canvas = document.createElement('canvas');
+    canvas.width = size ? size.width : Math.round(window.innerWidth * window.devicePixelRatio);
+    canvas.height = size ? size.height : Math.round(window.innerHeight * window.devicePixelRatio);
+    const ctx = canvas.getContext('2d');
+    const gradient = ctx.createLinearGradient(0, 0, canvas.width, canvas.height);
+    gradient.addColorStop(0, '#ff0000');
+    gradient.addColorStop(1, '#0000ff');
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    return canvas.toDataURL('image/png');
+  }, size);
+
+  const [serviceWorker] = context.serviceWorkers();
+  await serviceWorker.evaluate((dataUrl) => {
+    self.captureVisibleTab = async () => dataUrl;
+  }, captureDataUrl);
+
+  return captureDataUrl;
+}
+
+// The capture button is in the popup's static HTML, but its click handler and
+// the storage listener behind the usage bar are attached only after an async
+// start-up. Driving the popup before that finishes loses the click or the
+// usage update, so wait until start-up has painted the auth UI.
+async function waitForPopupReady(popupPage) {
+  await popupPage.waitForFunction(
+    () => document.getElementById('loginSection').style.display !== ''
+  );
+}
+
+// Clicks "Capture screenshot" in the popup. The popup is a tab here, so the
+// page under Extraction has to be the front tab for the service worker to
+// resolve it the way it resolves the page under a real popup.
+async function triggerCapture(popupPage, sourcePage) {
+  await sourcePage.bringToFront();
+  await waitForPopupReady(popupPage);
+  await popupPage.locator('#captureScreenshotBtn').click();
+}
+
+// Drags the Region the user would draw, in CSS pixels from the top left of the
+// viewport, and leaves the mouse where the drag ended.
+async function drawRegion(page, { x, y, width, height }) {
+  await page.bringToFront();
+  await page.mouse.move(x, y);
+  await page.mouse.down();
+  // Two moves, so a rectangle that only follows the last event still shows.
+  await page.mouse.move(x + Math.round(width / 2), y + Math.round(height / 2));
+  await page.mouse.move(x + width, y + height);
+  await page.mouse.up();
+}
+
 async function openPopup(context, extensionId) {
   const popupPage = await context.newPage();
   await popupPage.goto(`chrome-extension://${extensionId}/popup/popup.html`);
@@ -141,5 +198,9 @@ module.exports = {
   selectText,
   extractFromSelection,
   openPopup,
+  standInForCapture,
+  waitForPopupReady,
+  triggerCapture,
+  drawRegion,
   BACKEND_BASE_URL_OVERRIDE_KEY,
 };

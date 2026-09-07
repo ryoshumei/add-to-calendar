@@ -1,7 +1,7 @@
 // tests/screenshot-extraction.test.js
-// Drives a whole-tab Screenshot from the popup button through the backend
-// Extraction path against the stub backend: no OpenAI key, no real Supabase
-// project, no money spent.
+// Drives a Screenshot from the popup button — overlay, Region, capture — through
+// the backend Extraction path against the stub backend: no OpenAI key, no real
+// Supabase project, no money spent.
 //
 // One thing here is not the shipped code: chrome.tabs.captureVisibleTab needs
 // the activeTab grant Chrome only gives on a real toolbar click, which
@@ -9,54 +9,42 @@
 // it is replaced with a known image. Everything downstream — pipeline,
 // request, modal, usage — is what ships. The real capture is a manual check
 // before release.
-import { test, expect, openPopup } from './fixtures/extension-fixtures.js';
+import {
+  test,
+  expect,
+  openPopup,
+  standInForCapture,
+  triggerCapture,
+  drawRegion,
+} from './fixtures/extension-fixtures.js';
 
 const PROCESS_IMAGE_PATH = '/functions/v1/process-image';
+const OVERLAY = '#calendar-region-overlay';
 
-// Draws a capture-sized image in the page and hands it to the service worker
-// as the tab capture the next trigger will see.
-async function standInForCapture(context, page, { width = 1200, height = 800 } = {}) {
-  const captureDataUrl = await page.evaluate(
-    ({ width, height }) => {
-      const canvas = document.createElement('canvas');
-      canvas.width = width;
-      canvas.height = height;
-      const ctx = canvas.getContext('2d');
-      const gradient = ctx.createLinearGradient(0, 0, width, height);
-      gradient.addColorStop(0, '#ff0000');
-      gradient.addColorStop(1, '#0000ff');
-      ctx.fillStyle = gradient;
-      ctx.fillRect(0, 0, width, height);
-      return canvas.toDataURL('image/png');
-    },
-    { width, height }
-  );
+// Big enough to be a Region rather than a mis-click, small enough to fit any
+// window the suite runs in.
+const A_REGION = { x: 60, y: 40, width: 320, height: 180 };
 
-  const [serviceWorker] = context.serviceWorkers();
-  await serviceWorker.evaluate((dataUrl) => {
-    self.captureVisibleTab = async () => dataUrl;
-  }, captureDataUrl);
-
-  return captureDataUrl;
-}
-
-// The capture button is in the popup's static HTML, but its click handler and
-// the storage listener behind the usage bar are attached only after an async
-// start-up. Driving the popup before that finishes loses the click or the
-// usage update, so wait until start-up has painted the auth UI.
-async function waitForPopupReady(popupPage) {
-  await popupPage.waitForFunction(
-    () => document.getElementById('loginSection').style.display !== ''
+// Decodes a data URL in the page and measures it.
+async function imageSize(page, dataUrl) {
+  return page.evaluate(
+    (src) =>
+      new Promise((resolve, reject) => {
+        const image = new Image();
+        image.onload = () => resolve({ width: image.naturalWidth, height: image.naturalHeight });
+        image.onerror = () => reject(new Error('The Screenshot could not be decoded'));
+        image.src = src;
+      }),
+    dataUrl
   );
 }
 
-// Clicks "Capture screenshot" in the popup. The popup is a tab here, so the
-// page under Extraction has to be the front tab for the service worker to
-// resolve it the way it resolves the page under a real popup.
-async function captureFromPopup(popupPage, sourcePage) {
-  await sourcePage.bringToFront();
-  await waitForPopupReady(popupPage);
-  await popupPage.locator('#captureScreenshotBtn').click();
+// Runs the whole trigger: the popup opens the overlay on the page, and the
+// user drags a Region on it.
+async function captureRegion(popupPage, sourcePage, region = A_REGION) {
+  await triggerCapture(popupPage, sourcePage);
+  await expect(sourcePage.locator(OVERLAY)).toBeVisible();
+  await drawRegion(sourcePage, region);
 }
 
 test.describe('Screenshot Extraction (stub backend)', () => {
@@ -74,7 +62,7 @@ test.describe('Screenshot Extraction (stub backend)', () => {
     await standInForCapture(context, sourcePage, { width: 2400, height: 1200 });
     const popupPage = await openPopup(context, extensionId);
 
-    await captureFromPopup(popupPage, sourcePage);
+    await captureRegion(popupPage, sourcePage);
 
     const card = sourcePage.locator('.calendar-modal-overlay .event-card');
     await expect(card).toHaveCount(1);
@@ -88,6 +76,31 @@ test.describe('Screenshot Extraction (stub backend)', () => {
     expect(posts[0].headers['x-extension-version']).toBe(manifestVersion);
   });
 
+  test('the Screenshot that reaches the stub is the Region the user drew', async ({
+    context,
+    extensionId,
+    stubBackend,
+    sourcePage,
+    signedIn,
+  }) => {
+    // A capture the size a real one would be: the viewport in device pixels.
+    await standInForCapture(context, sourcePage);
+    const popupPage = await openPopup(context, extensionId);
+
+    await captureRegion(popupPage, sourcePage, A_REGION);
+
+    await expect(sourcePage.locator('.calendar-modal-overlay .event-card')).toHaveCount(1);
+    const [post] = stubBackend.requestsTo(PROCESS_IMAGE_PATH, 'POST');
+    const devicePixelRatio = await sourcePage.evaluate(() => window.devicePixelRatio);
+
+    // The Region is drawn in CSS pixels and captured in device pixels, and at
+    // this size the 1600 px cap never bites, so nothing is downscaled away.
+    expect(await imageSize(sourcePage, post.body.image)).toEqual({
+      width: Math.round(A_REGION.width * devicePixelRatio),
+      height: Math.round(A_REGION.height * devicePixelRatio),
+    });
+  });
+
   test('the modal shows a thumbnail of the Screenshot that was sent', async ({
     context,
     extensionId,
@@ -98,7 +111,7 @@ test.describe('Screenshot Extraction (stub backend)', () => {
     await standInForCapture(context, sourcePage);
     const popupPage = await openPopup(context, extensionId);
 
-    await captureFromPopup(popupPage, sourcePage);
+    await captureRegion(popupPage, sourcePage);
 
     const thumbnail = sourcePage.locator('.calendar-modal-overlay .screenshot-thumbnail');
     await expect(thumbnail).toBeVisible();
@@ -118,7 +131,7 @@ test.describe('Screenshot Extraction (stub backend)', () => {
     await standInForCapture(context, sourcePage);
     const popupPage = await openPopup(context, extensionId);
 
-    await captureFromPopup(popupPage, sourcePage);
+    await captureRegion(popupPage, sourcePage);
 
     await expect(popupPage.locator('#usageStats')).toBeVisible();
     await expect(popupPage.locator('#usageText')).toHaveText(
@@ -139,9 +152,11 @@ test.describe('Screenshot Extraction (stub backend)', () => {
     await standInForCapture(context, sourcePage);
     const popupPage = await openPopup(context, extensionId);
 
-    await captureFromPopup(popupPage, sourcePage);
+    await captureRegion(popupPage, sourcePage);
     await popupPage.locator('#captureScreenshotBtn').click();
 
+    // Not even an overlay to draw a second Region on.
+    await expect(sourcePage.locator(OVERLAY)).toHaveCount(0);
     const card = sourcePage.locator('.calendar-modal-overlay .event-card');
     await expect(card).toHaveCount(1);
     expect(stubBackend.requestsTo(PROCESS_IMAGE_PATH, 'POST')).toHaveLength(1);
@@ -158,7 +173,7 @@ test.describe('Screenshot Extraction (stub backend)', () => {
     await standInForCapture(context, sourcePage);
     const popupPage = await openPopup(context, extensionId);
 
-    await captureFromPopup(popupPage, sourcePage);
+    await captureRegion(popupPage, sourcePage);
 
     const authModal = sourcePage.locator('.calendar-modal-overlay .status-modal.error');
     await expect(authModal).toContainText('Session expired. Please sign in again with Google.');
@@ -178,7 +193,7 @@ test.describe('Screenshot Extraction (stub backend)', () => {
     await standInForCapture(context, sourcePage);
     const popupPage = await openPopup(context, extensionId);
 
-    await captureFromPopup(popupPage, sourcePage);
+    await captureRegion(popupPage, sourcePage);
 
     await expect(sourcePage.locator('.calendar-modal-overlay .extraction-error')).toContainText(
       limitMessage
@@ -197,14 +212,14 @@ test.describe('Screenshot Extraction (stub backend)', () => {
     await standInForCapture(context, sourcePage);
     const popupPage = await openPopup(context, extensionId);
 
-    await captureFromPopup(popupPage, sourcePage);
+    await captureRegion(popupPage, sourcePage);
 
     await expect(sourcePage.locator('.calendar-modal-overlay .no-events-message')).toContainText(
       'screenshot'
     );
   });
 
-  test('a page Chrome will not capture is reported in the popup', async ({
+  test('a page Chrome will not capture says so on the page', async ({
     context,
     extensionId,
     stubBackend,
@@ -213,12 +228,15 @@ test.describe('Screenshot Extraction (stub backend)', () => {
   }) => {
     // No stand-in here: the real chrome.tabs.captureVisibleTab refuses this
     // page for the same reason it refuses a browser-internal one — the
-    // extension is not allowed to capture it.
+    // extension is not allowed to capture it. By the time the Region is drawn
+    // the popup has closed, so the page is where the user is looking.
     const popupPage = await openPopup(context, extensionId);
 
-    await captureFromPopup(popupPage, sourcePage);
+    await captureRegion(popupPage, sourcePage);
 
-    await expect(popupPage.locator('#message')).toContainText('cannot be captured');
+    await expect(sourcePage.locator('.calendar-modal-overlay .extraction-error')).toContainText(
+      'cannot be captured'
+    );
     expect(stubBackend.requestsTo(PROCESS_IMAGE_PATH, 'POST')).toHaveLength(0);
   });
 
@@ -231,7 +249,7 @@ test.describe('Screenshot Extraction (stub backend)', () => {
     await standInForCapture(context, sourcePage);
     const popupPage = await openPopup(context, extensionId);
 
-    await captureFromPopup(popupPage, sourcePage);
+    await captureRegion(popupPage, sourcePage);
 
     await expect(sourcePage.locator('.calendar-modal-overlay .status-modal.error h3')).toContainText(
       'Setup Required'

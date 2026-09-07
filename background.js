@@ -166,18 +166,37 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     } else if (request.action === 'captureScreenshot') {
         // Screenshot trigger from the popup. The popup is not a tab, so the
         // active tab of the last focused window is the page the user is
-        // looking at.
+        // looking at. The trigger only opens the Region overlay; the capture
+        // happens once the user has drawn a Region there.
         console.log('📸 Received captureScreenshot request from popup');
 
         ensureAuthInitialized()
             .then(async () => {
                 const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
-                return handleScreenshotCapture(tab);
+                return startRegionCapture(tab);
             })
             .then(result => sendResponse(result))
             .catch(error => {
-                console.error('❌ Screenshot capture failed:', error);
+                console.error('❌ Could not start a Screenshot:', error);
                 sendResponse({ success: false, error: error.message, showInPopup: true });
+            });
+
+        return true; // Keep channel open for async response
+    } else if (request.action === 'regionDrawn') {
+        // The page reports the Region the user drew — null for the whole
+        // visible tab — and the device pixel ratio the capture will be in.
+        console.log('📸 Region drawn, capturing the tab');
+
+        ensureAuthInitialized()
+            .then(() => handleScreenshotCapture(
+                sender.tab,
+                request.region,
+                request.devicePixelRatio
+            ))
+            .then(result => sendResponse(result))
+            .catch(error => {
+                console.error('❌ Screenshot capture failed:', error);
+                sendResponse({ success: false, error: error.message });
             });
 
         return true; // Keep channel open for async response
@@ -413,10 +432,35 @@ async function captureVisibleTab(tab) {
     return chrome.tabs.captureVisibleTab(tab.windowId, { format: 'png' });
 }
 
-// Turn the visible tab into a Screenshot and run one Extraction on it.
-// Returns what the popup should do about a failure: `showInPopup` marks the
-// errors the page itself cannot report, because nothing was ever captured.
-async function handleScreenshotCapture(tab) {
+// Open the Region overlay on the page and leave it there: the user draws a
+// Region, and the page reports it back for the capture. A page that cannot run
+// the overlay is a page Chrome would refuse to capture anyway, so that is
+// reported to the popup while it is still open to show it.
+async function startRegionCapture(tab) {
+    if (!tab) {
+        return { success: false, error: CANNOT_CAPTURE_MESSAGE, showInPopup: true };
+    }
+
+    // The same per-tab guard the Selection flow uses: a trigger while one
+    // Extraction is in flight is ignored rather than charged.
+    if (activeRequests.has(tab.id)) {
+        console.log('Request already in progress for this tab');
+        return { success: false, ignored: true };
+    }
+
+    try {
+        await sendToContentScript(tab.id, { type: 'SHOW_REGION_OVERLAY' });
+        return { success: true };
+    } catch (error) {
+        console.error('Could not open the Region overlay:', error);
+        return { success: false, error: CANNOT_CAPTURE_MESSAGE, showInPopup: true };
+    }
+}
+
+// Turn the Region of the visible tab into a Screenshot and run one Extraction
+// on it. The Region is in CSS pixels, or null for the whole visible tab; the
+// device pixel ratio is what the capture is measured in.
+async function handleScreenshotCapture(tab, region = null, devicePixelRatio = 1) {
     if (!tab) {
         return { success: false, error: CANNOT_CAPTURE_MESSAGE, showInPopup: true };
     }
@@ -443,16 +487,21 @@ async function handleScreenshotCapture(tab) {
             // extension draws on the page would otherwise be in the Screenshot.
             capture = await captureVisibleTab(tab);
         } catch (error) {
+            // By now the popup the user triggered from has closed, so this is
+            // reported where they are looking: the page.
             console.error('Could not capture the visible tab:', error);
-            return { success: false, error: CANNOT_CAPTURE_MESSAGE, showInPopup: true };
+            await showExtractionError(tab.id, CANNOT_CAPTURE_MESSAGE);
+            return { success: false, error: CANNOT_CAPTURE_MESSAGE };
         }
 
         await sendStatusMessage(tab.id, 'Reading this page...', 'This may take a few seconds');
 
         try {
-            // No Region yet: the whole visible tab is the Region, so there is
-            // nothing to scale by the device pixel ratio.
-            const screenshot = await SCREENSHOT_PIPELINE.buildScreenshotDataUrl(capture, null, 1);
+            const screenshot = await SCREENSHOT_PIPELINE.buildScreenshotDataUrl(
+                capture,
+                region,
+                devicePixelRatio
+            );
 
             const eventDetails = await processImageWithBackend(
                 screenshot,
