@@ -11,6 +11,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     const messageDiv = document.getElementById('message');
     const togglePasswordButton = document.getElementById('togglePassword');
 
+    // Screenshot capture
+    const captureScreenshotBtn = document.getElementById('captureScreenshotBtn');
+
     // Authentication elements
     const googleSignInBtn = document.getElementById('googleSignInBtn');
     const signOutBtn = document.getElementById('signOutBtn');
@@ -48,6 +51,11 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // Load saved API key
     loadApiKey();
+
+    // Screenshot capture event listener
+    if (captureScreenshotBtn) {
+        captureScreenshotBtn.addEventListener('click', handleCaptureScreenshot);
+    }
 
     // Authentication event listeners
     if (googleSignInBtn) {
@@ -127,6 +135,26 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
     });
 });
+
+// Ask the service worker for a Screenshot of the visible tab and the
+// Extraction that follows. Only a failure the page cannot report — the tab was
+// never captured, so no modal can be shown on it — comes back for the popup to
+// show; anything after the capture appears in the page's own modal.
+async function handleCaptureScreenshot() {
+    console.log('📸 Capture screenshot requested from popup');
+
+    try {
+        const response = await chrome.runtime.sendMessage({ action: 'captureScreenshot' });
+        console.log('📸 Capture response:', response);
+
+        if (response && !response.success && response.showInPopup) {
+            showMessage(response.error, 'error');
+        }
+    } catch (error) {
+        console.error('Screenshot capture failed:', error);
+        showMessage('Screenshot failed: ' + error.message, 'error');
+    }
+}
 
 // Handle Google Sign In
 async function handleGoogleSignIn() {

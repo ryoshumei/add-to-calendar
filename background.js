@@ -7,6 +7,7 @@ importScripts('scripts/supabase-js.min.js'); // Supabase JavaScript client libra
 importScripts('scripts/supabase-client.js');
 importScripts('scripts/calendar-service.js');
 importScripts('scripts/llm-prompt.js');
+importScripts('scripts/screenshot-pipeline.js');
 
 // Global authentication state
 let supabaseAuth = null;
@@ -162,6 +163,24 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             });
 
         return true; // Keep the message channel open for async response
+    } else if (request.action === 'captureScreenshot') {
+        // Screenshot trigger from the popup. The popup is not a tab, so the
+        // active tab of the last focused window is the page the user is
+        // looking at.
+        console.log('📸 Received captureScreenshot request from popup');
+
+        ensureAuthInitialized()
+            .then(async () => {
+                const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+                return handleScreenshotCapture(tab);
+            })
+            .then(result => sendResponse(result))
+            .catch(error => {
+                console.error('❌ Screenshot capture failed:', error);
+                sendResponse({ success: false, error: error.message, showInPopup: true });
+            });
+
+        return true; // Keep channel open for async response
     } else if (request.action === 'userAuthenticated') {
         currentUser = request.user;
         console.log('User authenticated via popup:', currentUser?.email);
@@ -382,6 +401,106 @@ async function handleContextMenuClick(info, tab) {
     }
 }
 
+// Chrome refuses to capture browser-internal pages (chrome://, the Web Store)
+// and any page the extension was not invoked on.
+const CANNOT_CAPTURE_MESSAGE =
+    'This page cannot be captured. Chrome does not allow screenshots of browser pages such as chrome:// or the Web Store.';
+
+// Capture the visible area of the tab. Split out because Chrome only grants
+// the activeTab permission this needs on a real user gesture, which a test
+// browser cannot produce — a test stands in for this one call.
+async function captureVisibleTab(tab) {
+    return chrome.tabs.captureVisibleTab(tab.windowId, { format: 'png' });
+}
+
+// Turn the visible tab into a Screenshot and run one Extraction on it.
+// Returns what the popup should do about a failure: `showInPopup` marks the
+// errors the page itself cannot report, because nothing was ever captured.
+async function handleScreenshotCapture(tab) {
+    if (!tab) {
+        return { success: false, error: CANNOT_CAPTURE_MESSAGE, showInPopup: true };
+    }
+
+    // The same per-tab guard the Selection flow uses: a second trigger while
+    // one Extraction is in flight is ignored rather than charged.
+    if (activeRequests.has(tab.id)) {
+        console.log('Request already in progress for this tab');
+        return { success: false, ignored: true };
+    }
+
+    activeRequests.add(tab.id);
+
+    try {
+        if (!currentUser || !supabaseAuth?.isAuthenticated()) {
+            console.log('ℹ️ No session for a Screenshot — showing setup guidance');
+            await showSetupRequired(tab.id);
+            return { success: false, error: 'Sign in with Google to send a Screenshot.' };
+        }
+
+        let capture;
+        try {
+            // Captured before any status modal is shown: whatever the
+            // extension draws on the page would otherwise be in the Screenshot.
+            capture = await captureVisibleTab(tab);
+        } catch (error) {
+            console.error('Could not capture the visible tab:', error);
+            return { success: false, error: CANNOT_CAPTURE_MESSAGE, showInPopup: true };
+        }
+
+        await sendStatusMessage(tab.id, 'Reading this page...', 'This may take a few seconds');
+
+        try {
+            // No Region yet: the whole visible tab is the Region, so there is
+            // nothing to scale by the device pixel ratio.
+            const screenshot = await SCREENSHOT_PIPELINE.buildScreenshotDataUrl(capture, null, 1);
+
+            const eventDetails = await processImageWithBackend(
+                screenshot,
+                supabaseAuth.getAccessToken()
+            );
+
+            await hideStatusMessage(tab.id);
+            await sendToContentScript(tab.id, {
+                type: 'SHOW_CONFIRMATION',
+                requestId: `${tab.id}-${Date.now()}`,
+                events: eventDetails.events,
+                screenshot
+            });
+
+            return { success: true };
+        } catch (error) {
+            // A Screenshot has no basic fallback: a failed Extraction is an
+            // error the user sees, not an invented event.
+            console.error('Error extracting from the Screenshot:', error);
+            await hideStatusMessage(tab.id);
+
+            if (isAuthError(error)) {
+                await showAuthError(tab.id, error.message);
+            } else {
+                await showExtractionError(tab.id, error.message);
+            }
+
+            return { success: false, error: error.message };
+        }
+    } finally {
+        // The Screenshot lives only for this Extraction; nothing is stored.
+        activeRequests.delete(tab.id);
+    }
+}
+
+// Send a message to the page, injecting the content script once if it has not
+// loaded yet — the same retry the status modal uses.
+async function sendToContentScript(tabId, message) {
+    try {
+        return await chrome.tabs.sendMessage(tabId, message);
+    } catch (error) {
+        console.log('⚠️ Content script not ready, injecting...', error.message);
+        await chrome.scripting.executeScript({ target: { tabId }, files: ['content.js'] });
+        await new Promise(resolve => setTimeout(resolve, 100));
+        return await chrome.tabs.sendMessage(tabId, message);
+    }
+}
+
 // Helper functions for status messages
 async function sendStatusMessage(tabId, message, detail = '') {
     console.log('📤 Sending status message:', message, detail);
@@ -453,6 +572,38 @@ async function showAuthError(tabId, errorMessage) {
     }
 }
 
+// Show a failed Extraction in the page, with the same message the Selection
+// flow would report.
+async function showExtractionError(tabId, errorMessage) {
+    try {
+        await sendToContentScript(tabId, {
+            type: "SHOW_EXTRACTION_ERROR",
+            message: errorMessage
+        });
+    } catch (error) {
+        chrome.notifications.create({
+            type: 'basic',
+            iconUrl: 'icons/icon128.png',
+            title: 'Calendar Event Creator',
+            message: 'Error: ' + errorMessage
+        });
+    }
+}
+
+// Show the setup guidance modal for a user with neither a session nor a key.
+async function showSetupRequired(tabId) {
+    try {
+        await sendToContentScript(tabId, { type: "SHOW_SETUP_REQUIRED" });
+    } catch (error) {
+        chrome.notifications.create({
+            type: 'basic',
+            iconUrl: 'icons/icon128.png',
+            title: 'Setup Required',
+            message: 'Please sign in with Google or set your OpenAI API key in extension settings'
+        });
+    }
+}
+
 // Check if error is an authentication error
 function isAuthError(error) {
     if (!error) return false;
@@ -472,6 +623,78 @@ function isAuthError(error) {
     return authErrorPatterns.some(pattern => 
         errorMessage.toLowerCase().includes(pattern.toLowerCase())
     );
+}
+
+// Turn a failed Edge Function response into the error the user sees. Shared by
+// the Selection and Screenshot paths so both report a session expiry or a
+// monthly limit in the same words.
+async function backendResponseError(response) {
+    if (response.status === 401) {
+        return new Error('Session expired. Please sign in again with Google.');
+    }
+
+    let errorData = {};
+    try {
+        errorData = await response.json();
+    } catch (error) {
+        // A body that is not JSON tells us nothing beyond the status.
+    }
+
+    if (errorData.error && errorData.error.includes('Monthly limit exceeded')) {
+        return new Error(errorData.error);
+    }
+
+    if (errorData.error && (
+        errorData.error.includes('authentication') ||
+        errorData.error.includes('unauthorized') ||
+        errorData.error.includes('session')
+    )) {
+        return new Error('Authentication failed. Please sign in again with Google.');
+    }
+
+    return new Error(errorData.error || `Backend processing failed: ${response.status}`);
+}
+
+// Remember what the backend said this Extraction cost, so the popup's usage
+// bar shows it.
+async function storeUsageInfo(usage) {
+    if (!usage) return;
+
+    console.log(`Usage: ${usage.usageCount}/${usage.limit} for ${usage.yearMonth}`);
+    await chrome.storage.local.set({ usage_info: usage });
+}
+
+// Send a Screenshot to the backend for Extraction. Unlike the Selection path
+// there is no basic fallback: an Extraction that fails is reported as an error.
+async function processImageWithBackend(imageDataUrl, accessToken) {
+    if (!accessToken) {
+        throw new Error('Authentication required. Please sign in with Google.');
+    }
+
+    const manifest = chrome.runtime.getManifest();
+    const endpoint = await resolveBackendUrl(CONFIG.EDGE_FUNCTIONS.PROCESS_IMAGE);
+
+    const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${accessToken}`,
+            'X-Extension-Version': manifest.version,
+        },
+        // currentDateTime: the browser's local time (with timezone) so
+        // relative dates ("tomorrow") resolve against the user's clock,
+        // not the Edge Function's UTC clock.
+        body: JSON.stringify({ image: imageDataUrl, currentDateTime: new Date().toString() })
+    });
+
+    if (!response.ok) {
+        throw await backendResponseError(response);
+    }
+
+    const data = await response.json();
+    await storeUsageInfo(data.usage);
+
+    return data.eventDetails;
 }
 
 // Process text with backend service
@@ -502,40 +725,16 @@ async function processWithBackend(text, accessToken) {
             body: JSON.stringify({ selectedText: text, currentDateTime: new Date().toString() })
         });
 
-        // Check for auth errors
-        if (response.status === 401) {
-            throw new Error('Session expired. Please sign in again with Google.');
-        }
-
+        // A 401 or a usage limit is reported in the same words as on the
+        // Screenshot path, and neither falls back to basic event creation.
         if (!response.ok) {
-            const errorData = await response.json();
-
-            // Check if it's a usage limit error
-            if (errorData.error && errorData.error.includes('Monthly limit exceeded')) {
-                // Don't fall back to basic for limit errors - let user know they need to upgrade or wait
-                throw new Error(errorData.error);
-            }
-            
-            // Check for other auth-related errors
-            if (errorData.error && (
-                errorData.error.includes('authentication') ||
-                errorData.error.includes('unauthorized') ||
-                errorData.error.includes('session')
-            )) {
-                throw new Error('Authentication failed. Please sign in again with Google.');
-            }
-
-            throw new Error(errorData.error || `Backend processing failed: ${response.status}`);
+            throw await backendResponseError(response);
         }
 
         const data = await response.json();
         console.log('Backend processing successful:', data.eventDetails);
 
-        // Store usage information if present
-        if (data.usage) {
-            console.log(`Usage: ${data.usage.usageCount}/${data.usage.limit} for ${data.usage.yearMonth}`);
-            await chrome.storage.local.set({ usage_info: data.usage });
-        }
+        await storeUsageInfo(data.usage);
 
         return data.eventDetails;
     } catch (error) {

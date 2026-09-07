@@ -236,6 +236,18 @@ style.textContent = `
     color: #202124;
 }
 
+/* Thumbnail of the screenshot the events were read from */
+.screenshot-thumbnail {
+    display: block;
+    width: 100%;
+    max-height: 150px;
+    object-fit: contain;
+    margin: 0 0 12px 0;
+    border: 1px solid #e0e0e0;
+    border-radius: 6px;
+    background-color: #f8f9fa;
+}
+
 /* Multi-event modal styles */
 .events-list {
     max-height: 400px;
@@ -486,7 +498,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             return;
         }
 
-        showConfirmationModal(events, message.calendarUrl);
+        showConfirmationModal(events, message.calendarUrl, message.screenshot);
     } else if (message.type === "ERROR") {
         showError(message.message);
     } else if (message.type === "SHOW_STATUS") {
@@ -499,6 +511,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         showAuthErrorModal(message.message);
     } else if (message.type === "SHOW_SETUP_REQUIRED") {
         showSetupRequiredModal();
+    } else if (message.type === "SHOW_EXTRACTION_ERROR") {
+        showExtractionErrorModal(message.message);
     }
 });
 
@@ -656,6 +670,52 @@ function showAuthErrorModal(errorMessage = 'Authentication failed') {
     }, 20000);
 }
 
+// Show a failed Extraction. A Screenshot has no basic fallback, so the user
+// gets the reason — a monthly limit, a backend failure — instead of an
+// invented event.
+function showExtractionErrorModal(errorMessage = 'Something went wrong') {
+    hideStatusModal();
+    const existingModal = document.querySelector('.calendar-modal-overlay');
+    if (existingModal) {
+        existingModal.remove();
+    }
+
+    const modal = document.createElement('div');
+    modal.className = 'calendar-modal-overlay';
+
+    modal.innerHTML = `
+        <div class="status-modal error extraction-error">
+            <h3>⚠️ Could not create events</h3>
+            <div class="error-message"></div>
+            <div style="margin-top: 15px;">
+                <button class="secondary">Close</button>
+            </div>
+        </div>
+    `;
+
+    // The message comes from the backend, so it is attached as text.
+    modal.querySelector('.error-message').textContent = errorMessage;
+
+    document.body.appendChild(modal);
+
+    modal.querySelector('button.secondary').addEventListener('click', () => {
+        modal.remove();
+    });
+
+    modal.addEventListener('click', (e) => {
+        if (e.target === modal) {
+            modal.remove();
+        }
+    });
+
+    // Auto-remove after 20 seconds
+    setTimeout(() => {
+        if (modal.parentElement) {
+            modal.remove();
+        }
+    }, 20000);
+}
+
 // Show setup required modal when user has neither auth nor API key
 function showSetupRequiredModal() {
     console.log('🔧 Showing setup required modal');
@@ -769,8 +829,10 @@ function showSetupRequiredModal() {
     }, 30000);
 }
 
-// Display the confirmation modal for event creation (supports multiple events)
-function showConfirmationModal(events, fallbackCalendarUrl) {
+// Display the confirmation modal for event creation (supports multiple events).
+// `screenshot` is the data URL of the Screenshot the Events were read from,
+// shown as a thumbnail; a Selection has none.
+function showConfirmationModal(events, fallbackCalendarUrl, screenshot) {
     // Remove any existing modals first
     const existingModal = document.querySelector('.calendar-modal-overlay');
     if (existingModal) {
@@ -791,9 +853,12 @@ function showConfirmationModal(events, fallbackCalendarUrl) {
         return date.toLocaleString();
     };
 
-    // Generate event cards HTML (empty state when no events were found)
+    // Generate event cards HTML (empty state names the source it read)
+    const emptyMessage = screenshot
+        ? 'No events were found in this screenshot.'
+        : 'No events were found in the selected text.';
     const eventsHtml = events.length === 0
-        ? '<div class="no-events-message">No events were found in the selected text.</div>'
+        ? `<div class="no-events-message">${emptyMessage}</div>`
         : events.map((event, index) => {
         const calendarUrl = createGoogleCalendarUrlForContent(event);
         return `
@@ -855,6 +920,18 @@ function showConfirmationModal(events, fallbackCalendarUrl) {
             </div>
         </div>
     `;
+
+    // The thumbnail is attached through the DOM, never interpolated into the
+    // template above: that template already carries model output.
+    if (screenshot) {
+        const thumbnail = document.createElement('img');
+        thumbnail.className = 'screenshot-thumbnail';
+        thumbnail.alt = 'The screenshot these events were read from';
+        thumbnail.src = screenshot;
+
+        const eventsList = modal.querySelector('.events-list');
+        eventsList.parentElement.insertBefore(thumbnail, eventsList);
+    }
 
     document.body.appendChild(modal);
 

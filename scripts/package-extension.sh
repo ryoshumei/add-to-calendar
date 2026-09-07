@@ -49,6 +49,7 @@ zip -r "$OUTPUT_FILE" \
     scripts/supabase-client.js \
     scripts/calendar-service.js \
     scripts/llm-prompt.js \
+    scripts/screenshot-pipeline.js \
     scripts/supabase-js.min.js \
     icons/ \
     -x "*.DS_Store" "*.git*" "*/.*" \

@@ -112,6 +112,13 @@ async function startStubBackend() {
     events: DEFAULT_EVENTS.map((event) => ({ ...event })),
     usage: { ...DEFAULT_USAGE },
     user: STUB_USER,
+    // Holds the Edge Function answers back, so a test can act while an
+    // Extraction is still in flight.
+    responseDelayMs: 0,
+    // Set either to { status, body } to make that endpoint fail instead of
+    // returning the canned Events.
+    textResponse: null,
+    imageResponse: null,
     requestsTo(pathname, method) {
       return requests.filter(
         (request) =>
@@ -141,11 +148,21 @@ async function startStubBackend() {
       }
 
       const json = (status, payload) => {
-        res.writeHead(status, {
-          ...CORS_HEADERS,
-          'Content-Type': 'application/json',
-        });
-        res.end(JSON.stringify(payload));
+        const send = () => {
+          res.writeHead(status, {
+            ...CORS_HEADERS,
+            'Content-Type': 'application/json',
+          });
+          res.end(JSON.stringify(payload));
+        };
+
+        // Only the Edge Functions are held back: the auth endpoints are part
+        // of start-up, not of the flow a test is timing.
+        if (stub.responseDelayMs > 0 && url.pathname.startsWith('/functions/v1/')) {
+          setTimeout(send, stub.responseDelayMs);
+        } else {
+          send();
+        }
       };
 
       if (url.pathname === '/auth/v1/user') {
@@ -154,6 +171,19 @@ async function startStubBackend() {
       }
 
       if (url.pathname === '/functions/v1/process-text') {
+        if (stub.textResponse) {
+          json(stub.textResponse.status, stub.textResponse.body);
+          return;
+        }
+        json(200, { eventDetails: { events: stub.events }, usage: stub.usage });
+        return;
+      }
+
+      if (url.pathname === '/functions/v1/process-image') {
+        if (stub.imageResponse) {
+          json(stub.imageResponse.status, stub.imageResponse.body);
+          return;
+        }
         json(200, { eventDetails: { events: stub.events }, usage: stub.usage });
         return;
       }
