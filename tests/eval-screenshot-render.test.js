@@ -14,17 +14,38 @@ import { test, expect } from '@playwright/test';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import { pathToFileURL } from 'url';
 import { renderScreenshots } from '../scripts/render-eval-screenshots.js';
 
 const sharedDir = path.resolve(__dirname, '..', 'supabase', 'functions', '_shared');
 const fixtureDir = path.join(sharedDir, 'eval-screenshots');
 const casesFile = path.join(sharedDir, 'eval-screenshot-cases.ts');
 
-/** Fixture file names declared by the eval cases. */
-function declaredFixtures() {
-  const source = fs.readFileSync(casesFile, 'utf-8');
-  return [...source.matchAll(/fixture:\s*'([^']+)'|fixture:\s*"([^"]+)"/g)]
-    .map((match) => match[1] || match[2]);
+// The render jobs the live tier feeds the renderer, read from the eval module
+// itself — `screenshotRenderJobs()` is the seam, so this guard breaks when the
+// cases change rather than when their quoting does.
+//
+// Deno imports that module as TypeScript; Node cannot, so the type-only syntax
+// is stripped and the module evaluated, the way tests/llm-prompt-sync.test.js
+// loads the backend prompt. `import.meta.url`, which the module resolves its
+// fixture paths against, is passed in instead.
+function screenshotRenderJobs() {
+  const source = fs
+    .readFileSync(casesFile, 'utf-8')
+    // The one import is type-only, and its types are gone by the next line.
+    .replace(/^import[^;]*;$/gm, '')
+    .replace(/^export interface [\s\S]*?\n\}\n/gm, '')
+    .replace(/^export type [^\n]*\n/gm, '')
+    .replace(/\bas const\b/g, '')
+    .replace(/:\s*ScreenshotEvalCase\[\]/g, '')
+    .replace(/:\s*ScreenshotEvalCase\b/g, '')
+    .replace(/\):\s*string\s*\{/g, ') {')
+    .replace(/\):\s*Array<[^{]*\{[^}]*\}>\s*\{/g, ') {')
+    .replace(/^export /gm, '')
+    .replace(/import\.meta\.url/g, 'moduleUrl');
+
+  const evaluate = new Function('moduleUrl', `${source}\nreturn screenshotRenderJobs();`);
+  return evaluate(pathToFileURL(casesFile).href);
 }
 
 /** Width and height from a PNG's IHDR chunk. */
@@ -37,7 +58,7 @@ function pngSize(buffer) {
 test.describe('Screenshot eval fixtures', () => {
   test('the fixture directory holds the declared HTML and nothing else', () => {
     const onDisk = fs.readdirSync(fixtureDir);
-    const declared = declaredFixtures();
+    const declared = screenshotRenderJobs().map((job) => path.basename(job.html));
 
     expect(declared.length).toBeGreaterThan(0);
     // Screenshots are rendered at eval time, never committed.
@@ -46,15 +67,12 @@ test.describe('Screenshot eval fixtures', () => {
   });
 
   test('every fixture renders to a non-blank PNG', async () => {
-    const fixtures = fs.readdirSync(fixtureDir).filter((f) => f.endsWith('.html'));
-    expect(fixtures.length).toBeGreaterThan(0);
+    // The live tier's own job list, so what is proven renderable here is what
+    // it renders there.
+    const jobs = screenshotRenderJobs();
+    expect(jobs.length).toBeGreaterThan(0);
 
     const outDir = fs.mkdtempSync(path.join(os.tmpdir(), 'screenshot-eval-'));
-    const jobs = fixtures.map((file) => ({
-      name: path.basename(file, '.html'),
-      html: path.join(fixtureDir, file),
-    }));
-
     const rendered = await renderScreenshots({ jobs, outDir });
     expect(rendered.map((r) => r.name).sort()).toEqual(jobs.map((j) => j.name).sort());
 

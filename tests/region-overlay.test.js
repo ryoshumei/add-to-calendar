@@ -65,6 +65,25 @@ async function holdTheCapture(context) {
   };
 }
 
+// Drags the pointer to a corner and settles on the rectangle that corner
+// makes, in CSS pixels.
+//
+// The pointer is not the test's alone: the browser delivers a mousemove of its
+// own at the desktop cursor whenever it raises the window — the popup closing
+// itself over the page does exactly that — and one landing mid-drag stretches
+// the rectangle to a corner the test never dragged to. A real user's cursor is
+// that cursor, so this is the harness catching up rather than the overlay
+// misbehaving: the move is repeated until the rectangle is the one the drag
+// asks for, which also covers the move → layout round-trip.
+async function expectRectangleDraggingTo(sourcePage, corner, expected) {
+  await expect
+    .poll(async () => {
+      await sourcePage.mouse.move(corner.x, corner.y);
+      return sourcePage.locator(REGION_RECT).boundingBox();
+    })
+    .toEqual(expected);
+}
+
 // Opens the overlay the way a user does, and leaves the pointer pressed at the
 // corner the Region starts from.
 async function startDrawing(context, extensionId, sourcePage, from) {
@@ -119,21 +138,17 @@ test.describe('Region overlay', () => {
   }) => {
     await startDrawing(context, extensionId, sourcePage, { x: 120, y: 90 });
 
-    await sourcePage.mouse.move(320, 250);
-    expect(await sourcePage.locator(REGION_RECT).boundingBox()).toEqual({
-      x: 120,
-      y: 90,
-      width: 200,
-      height: 160,
-    });
+    await expectRectangleDraggingTo(
+      sourcePage,
+      { x: 320, y: 250 },
+      { x: 120, y: 90, width: 200, height: 160 }
+    );
 
-    await sourcePage.mouse.move(420, 200);
-    expect(await sourcePage.locator(REGION_RECT).boundingBox()).toEqual({
-      x: 120,
-      y: 90,
-      width: 300,
-      height: 110,
-    });
+    await expectRectangleDraggingTo(
+      sourcePage,
+      { x: 420, y: 200 },
+      { x: 120, y: 90, width: 300, height: 110 }
+    );
   });
 
   test('Esc dismisses the overlay and captures nothing', async ({
@@ -294,13 +309,10 @@ test.describe('Region overlay', () => {
   }) => {
     await startDrawing(context, extensionId, sourcePage, { x: 420, y: 300 });
 
-    await sourcePage.mouse.move(220, 140);
-
-    expect(await sourcePage.locator(REGION_RECT).boundingBox()).toEqual({
-      x: 220,
-      y: 140,
-      width: 200,
-      height: 160,
-    });
+    await expectRectangleDraggingTo(
+      sourcePage,
+      { x: 220, y: 140 },
+      { x: 220, y: 140, width: 200, height: 160 }
+    );
   });
 });
