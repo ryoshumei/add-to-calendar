@@ -1,4 +1,74 @@
-# Chrome Web Store Update Guide - Version 1.1.0
+# Chrome Web Store Update Guide
+
+## Version 1.3.0 — Screenshot Source
+
+This release adds a second Source: the user draws a Region over the visible tab and the extension extracts Events from that Screenshot through the same paths as a Selection (own OpenAI key, else the backend). **No new manifest permissions**; the backend is unchanged.
+
+### Package
+```bash
+npm run package        # → calendar-event-creator-v1.3.0.zip
+```
+Load the unpacked archive in a fresh Chrome profile before uploading and confirm the service worker starts with no errors, the popup shows "Capture screenshot", and a right-click shows "Add screenshot to Google Calendar".
+
+### Manual pre-release checks (cannot run under Playwright)
+- On a Retina display, draw a Region and confirm the image that reaches the confirmation modal thumbnail is exactly the drawn Region (device-pixel-ratio crop)
+- Start a Screenshot on a browser-internal page (`chrome://extensions`) or the Web Store and confirm the plain "cannot capture this page" error
+- The context-menu item appears on a page with nothing selected
+
+### "What's New" (copy into the store field)
+```
+Version 1.3.0 - September 2026
+
+NEW: Screenshot Source
+• Click "Capture screenshot" in the popup, or right-click and choose "Add screenshot to Google Calendar"
+• Draw a box over the part of the page that holds the event (Esc cancels; Enter or double-click sends the whole visible tab)
+• Only the box you draw is captured; it is downscaled in your browser, sent for extraction, and discarded
+• Works with your own OpenAI key (image goes straight to OpenAI) or with Google sign-in (one request of your monthly allowance, same as text)
+• A thumbnail in the confirmation modal shows what was read
+• A setting in the popup hides the right-click screenshot item if you only use the popup button
+
+IMPROVEMENTS:
+• Timetables and posters in Japanese and English extract one event per session
+• Clearer "no events found" state
+```
+
+### Store listing additions
+Add to **KEY FEATURES**:
+```
+• Screenshot any part of a page — posters, embedded calendars, chat screenshots, PDFs — and turn it into events
+```
+Add to **HOW TO USE**:
+```
+From a screenshot:
+1. Click the extension icon and "Capture screenshot" (or right-click → "Add screenshot to Google Calendar")
+2. Draw a box over the event details; release to capture (Esc cancels, Enter or double-click sends the whole visible tab)
+3. Review the extracted events and the thumbnail of what was read, then add each to Google Calendar
+```
+Replace the **activeTab** line under PERMISSIONS EXPLAINED:
+```
+• activeTab - Read the text you selected, and capture the visible tab when you start a screenshot (only the box you draw leaves the browser)
+```
+
+### Privacy practices (developer dashboard)
+**Data Collection → Website Content**: "The text you select, or the screenshot Region you draw, sent only when you trigger the extension. Only the drawn Region is captured; nothing else on the page is."
+
+**Data Sharing → OpenAI**: "Text and images (the selected text or the screenshot Region) are sent to OpenAI to extract event details. Not stored by the extension."
+
+**Data Retention**: "Selected text and screenshots are not retained; they are processed and discarded."
+
+**Permission justification — `activeTab`** (replaces the earlier text):
+> The extension reads the text the user selected on the active tab, and when the user explicitly starts a screenshot (popup button or context-menu item) it captures the visible tab once, crops it in the browser to the rectangle the user drew, and sends only that region for event extraction. Capture happens only on that user gesture; the extension never captures pages on its own, never captures outside the drawn region, and does not store the image.
+
+The privacy policy page (`docs/index.html`, published via GitHub Pages) was updated in the same release: collection ("the Selection or the Screenshot Region you choose to send"), "only the Region you draw is captured", retention ("Screenshots are never stored"), and third parties ("OpenAI processes text and images").
+
+### Screenshots to add
+1. Region overlay mid-drag over an event poster
+2. Confirmation modal with the thumbnail of the captured Region
+3. Popup showing "Capture screenshot" and the right-click menu toggle
+
+---
+
+## Version 1.1.0 (historical)
 
 ## Pre-Deployment Checklist
 
@@ -40,14 +110,18 @@ This creates: `calendar-event-creator-v1.1.0.zip`
 ### Option B: Manual ZIP Creation
 ```bash
 # Create ZIP with only necessary files
-zip -r calendar-event-creator-v1.1.0.zip \
+# The file list lives in scripts/package-extension.sh — keep this in sync with it
+zip -r calendar-event-creator-v$(grep -o '"version": *"[^"]*"' manifest.json | grep -o '[0-9.]*').zip \
     manifest.json \
     background.js \
     content.js \
     config.js \
     popup/ \
+    scripts/backend-config.js \
     scripts/supabase-client.js \
     scripts/calendar-service.js \
+    scripts/llm-prompt.js \
+    scripts/screenshot-pipeline.js \
     scripts/supabase-js.min.js \
     icons/ \
     -x "*.DS_Store" "*.git*" "*/.*"
@@ -202,7 +276,7 @@ BUG FIXES:
 
 **Data Collection:**
 - ✅ Authentication Information (Google OAuth tokens, email)
-- ✅ Website Content (selected text for event parsing)
+- ✅ Website Content (selected text, or the screenshot Region the user draws, for event parsing)
 - ✅ Usage Statistics (monthly event creation count)
 
 **Data Usage:**
@@ -212,11 +286,12 @@ BUG FIXES:
 
 **Data Sharing:**
 - ❌ Not sold to third parties
-- ✅ Shared with OpenAI (for text processing only)
+- ✅ Shared with OpenAI (text and images, for event extraction only)
 - ✅ Shared with Google Calendar (for event creation)
 
 **Data Retention:**
 - Sessions: Until user signs out
+- Selected text and screenshots: not retained
 - Usage stats: Stored for billing cycle (1 month)
 - API keys: Stored locally only
 

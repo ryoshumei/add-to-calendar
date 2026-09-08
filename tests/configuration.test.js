@@ -194,6 +194,10 @@ test.describe('Configuration Management', () => {
 
       // Check manifest version
       expect(manifestPermissions.manifestVersion).toBe(3);
+
+      // Extension version shipped with the Screenshot Source (1.3.0); the
+      // backend reads it from the X-Extension-Version header
+      expect(manifestPermissions.version).toBe('1.3.0');
     });
 
     test('should have valid OAuth client ID format', async ({ context }) => {

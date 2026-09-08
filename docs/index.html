@@ -181,11 +181,11 @@
             <p class="subtitle">Calendar Event Creator Chrome Extension</p>
         </header>
 
-        <p class="last-updated"><strong>Last Updated:</strong> November 2025</p>
+        <p class="last-updated"><strong>Last Updated:</strong> September 2026</p>
 
         <section>
             <h2>What This Extension Does</h2>
-            <p>Calendar Event Creator helps you quickly create Google Calendar events from any text on the web. Select text, right-click, and we'll extract event details using AI.</p>
+            <p>Calendar Event Creator helps you quickly create Google Calendar events from any web page. Select text, or draw a box over part of the page to take a Screenshot of just that Region, and we'll extract event details using AI.</p>
 
             <div class="info-box">
                 <strong>Two ways to use:</strong>
@@ -208,12 +208,12 @@
                 <li><strong>Authentication tokens</strong> – To keep you signed in</li>
             </ul>
 
-            <h3>2. Selected Text You Choose to Process</h3>
-            <p>When you right-click and select "Add to Google Calendar":</p>
+            <h3>2. The Selection or the Screenshot Region You Choose to Send</h3>
+            <p>When you right-click and select "Add to Google Calendar", or start a Screenshot and draw a Region over the page:</p>
             <ul>
-                <li>We receive the text you selected</li>
+                <li>We receive the text you selected, or the Screenshot Region you drew – a picture of only that part of the visible tab, downscaled before it leaves your browser</li>
                 <li>It's sent to OpenAI to extract event details (date, time, title, location)</li>
-                <li><strong>Not stored</strong> – Processed immediately and discarded</li>
+                <li><strong>Not stored</strong> – Processed immediately and discarded. A Screenshot is never written to disk or kept after extraction</li>
             </ul>
 
             <h3>3. Usage Count (Signed-In Users Only)</h3>
@@ -236,7 +236,7 @@
                     <td class="no">Never collected</td>
                 </tr>
                 <tr>
-                    <td>Any text you don't explicitly select</td>
+                    <td>Anything you did not explicitly select – only the Region you draw is captured; nothing else on the page is</td>
                     <td class="no">Never collected</td>
                 </tr>
                 <tr>
@@ -270,7 +270,7 @@
                         <td>Keep you signed in, authorize API requests</td>
                     </tr>
                     <tr>
-                        <td>Selected text</td>
+                        <td>Selected text or Screenshot Region</td>
                         <td>Extract event details and create calendar events</td>
                     </tr>
                     <tr>
@@ -288,15 +288,15 @@
 
             <div class="info-box">
                 <p><strong>Google OAuth</strong> – For sign-in (they already have your email/name)</p>
-                <p><strong>OpenAI API</strong> – Processes your selected text to extract event details</p>
+                <p><strong>OpenAI API</strong> – Processes the text and images you send (your Selection or Screenshot Region) to extract event details</p>
                 <p><strong>Supabase</strong> – Stores your session and usage count (for signed-in users)</p>
                 <p><strong>Google Calendar</strong> – You manually add events (we only create the URL)</p>
             </div>
 
             <h3>Two Processing Paths:</h3>
             <ul>
-                <li><strong>With your API key:</strong> Text goes directly from your browser to OpenAI (never touches our servers)</li>
-                <li><strong>Signed in without API key:</strong> Text goes through our Supabase backend, then to OpenAI</li>
+                <li><strong>With your API key:</strong> Your Selection or Screenshot goes directly from your browser to OpenAI (never touches our servers)</li>
+                <li><strong>Signed in without API key:</strong> Your Selection or Screenshot goes through our Supabase backend, then to OpenAI. A Screenshot costs one request of your monthly allowance, the same as text</li>
             </ul>
         </section>
 
@@ -322,8 +322,8 @@
                 </thead>
                 <tbody>
                     <tr>
-                        <td>Selected text</td>
-                        <td class="yes">Not retained – deleted immediately after processing</td>
+                        <td>Selected text or Screenshot Region</td>
+                        <td class="yes">Not retained – deleted immediately after processing; Screenshots are never stored</td>
                     </tr>
                     <tr>
                         <td>Authentication tokens</td>
@@ -354,7 +354,7 @@
             </ul>
 
             <div class="highlight">
-                <strong>Privacy Mode:</strong> Use your own OpenAI API key to keep all processing local. No sign-in required, no usage limits, no data sent to our servers.
+                <strong>Privacy Mode:</strong> Use your own OpenAI API key to keep all processing local. No sign-in required, no usage limits, and neither text nor Screenshots are sent to our servers.
             </div>
         </section>
 

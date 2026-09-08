@@ -4,16 +4,18 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Chrome extension that creates Google Calendar events from selected text using OpenAI's natural language processing. The extension supports two authentication modes:
+Chrome extension that creates Google Calendar events from a Source the user points at on a page — a Selection (highlighted text) or a Screenshot (a Region the user draws over the visible tab) — using OpenAI for Extraction. Vocabulary is defined in `CONTEXT.md`. The extension supports two authentication modes:
 - **Authenticated users**: Sign in with Google via Supabase → backend processes events (no API key needed)
 - **Unauthenticated users**: Provide OpenAI API key → client-side processing
 
 ## Architecture
 
 ### Core Components
-- **background.js**: Service worker managing context menus, OpenAI API calls, authentication, and message routing
-- **content.js**: Content script for modal display and user interaction
-- **popup/**: Extension settings popup for API key management and Google sign-in
+- **background.js**: Service worker managing context menus, Screenshot capture, OpenAI API calls, authentication, and message routing
+- **content.js**: Content script for the confirmation modal, the Region overlay, and user interaction
+- **popup/**: Extension settings popup for API key management, Google sign-in, the "Capture screenshot" button and the right-click menu toggle
+- **scripts/screenshot-pipeline.js**: Pure Screenshot pipeline (capture data URL + Region + device pixel ratio → cropped, downscaled JPEG data URL); no DOM dependency
+- **scripts/backend-config.js**: Resolves the Supabase auth, Edge Function and OpenAI URLs; honours a test-only override that is inert in production
 - **config.js**: Public configuration (Supabase URL, Google OAuth client ID)
 - **scripts/supabase-client.js**: Authentication service using Supabase + Chrome Identity API
 - **scripts/calendar-service.js**: Google Calendar URL generation and event creation
@@ -37,6 +39,14 @@ Chrome extension that creates Google Calendar events from selected text using Op
 **Unauthenticated users:**
 1. Same flow but requires OpenAI API key in extension settings
 2. Client-side processing only (no backend service access)
+
+**Screenshot (either mode):**
+1. User clicks "Capture screenshot" in the popup (the popup then closes) or right-clicks → "Add screenshot to Google Calendar" (available on any page, with or without a Selection; hidden by the popup toggle stored as `showScreenshotMenuItem` in sync storage, default on — the service worker re-registers its menus on change)
+2. background.js injects the Region overlay into the active tab (same inject-and-retry as the modal). Drag draws the Region; mouse-up submits it; Esc or a drag under 10 px cancels; Enter or double-click submits the whole visible tab. The overlay hides itself (and any open modal) and waits a frame before reporting, so it never appears in the capture. The Region is reported with the device pixel ratio
+3. background.js captures the visible tab (`chrome.tabs.captureVisibleTab`, allowed by the existing activeTab grant — no permission was added) and runs the Screenshot pipeline: crop to Region × dpr, downscale so the longest side is ≤ 1600 px, JPEG quality 0.7; an encoded result over 10 MB is an error
+4. **Priority logic is the same as text**: user's OpenAI key (`processImageWithOpenAI`, request built by `LLM_CONFIG.buildImageRequestBody`) > backend `process-image` endpoint (`processImageWithBackend`, sends the data URL, current date-time and the `X-Extension-Version` header; stores returned usage like text) > setup-required modal. **No basic fallback**: a failed Extraction shows an error in the modal. Any active Selection is ignored; one Source per Extraction
+5. content.js shows the confirmation modal with the Events plus a thumbnail of the sent Region (attached through the DOM, not string HTML). The image lives only for the one Extraction; nothing is written to storage
+6. The same per-tab in-flight guard as Selection ignores a second capture while one is processing. Pages Chrome will not capture (browser pages, the Web Store) show a plain "cannot capture" error
 
 ### Key Patterns
 - **Manifest V3 Service Worker**: background.js is not persistent, uses importScripts for dependencies
@@ -139,8 +149,8 @@ Keep these permission-free: anything that must touch the filesystem belongs in t
 ### Stub-Backend Harness (end-to-end without the real backend)
 `tests/fixtures/stub-backend.js` runs a local HTTP server that answers the Supabase auth endpoint and the Edge Functions, records every request (headers and body), and serves the page a test drives a Selection from. It costs nothing and touches no network.
 
-- `stubBackend` fixture: starts/stops the server; `stub.events` and `stub.usage` are the canned answers for `process-text`, `process-image` and the OpenAI route alike, `stub.requestsTo(pathname, method)` the assertions. `stub.textResponse` / `stub.imageResponse` / `stub.openAiResponse` (`{ status, body }`) make one endpoint fail instead; `stub.openAiContent` hands the own-key path raw model output (fenced JSON, a single event object, empty) so normalisation can be driven; `stub.responseDelayMs` holds the Edge Function answers back so a test can act mid-Extraction
-- `stubbedEndpoints` fixture: writes the stub's base URL to `backend_base_url_override` in `chrome.storage.local`. `signedIn` builds on it with a session in `supabase_session` plus a re-run of `initializeAuth()`; `ownKey` builds on it with an OpenAI key in `chrome.storage.sync`, for the own-key path
+- `stubBackend` fixture: starts/stops the server; `stub.events` is the canned answer for `process-text`, `process-image` and the OpenAI route alike, `stub.usage` for the two Edge Functions (the OpenAI route returns events only), `stub.requestsTo(pathname, method)` the assertions. `stub.textResponse` / `stub.imageResponse` / `stub.openAiResponse` (`{ status, body }`) make one endpoint fail instead; `stub.openAiContent` hands the own-key path raw model output (fenced JSON, a single event object, empty) so normalisation can be driven; `stub.responseDelayMs` holds the Edge Function answers back so a test can act mid-Extraction
+- `stubbedEndpoints` fixture: writes the stub's base URL to `backend_base_url_override` in `chrome.storage.local`. `signedIn` builds on it with a session in `supabase_session`, then resets the worker's memoised auth start-up (`authStartUp`/`supabaseAuth`) and re-runs `initializeAuth()` — production deliberately never rebuilds its single client; `ownKey` builds on it with an OpenAI key in `chrome.storage.sync`, for the own-key path
 - `scripts/backend-config.js`: resolves those URLs — the Supabase auth endpoints, the Edge Functions and OpenAI's `/v1/chat/completions`. **With no override stored — every real install — the production URLs are used unchanged**; the extension never writes that key itself
 - Examples: `tests/selection-extraction.test.js` and `tests/screenshot-extraction.test.js` (trigger → backend request → confirmation modal → popup usage bar), `tests/screenshot-key-path.test.js` (trigger → OpenAI request → confirmation modal, with the backend never contacted)
 - `chrome.tabs.captureVisibleTab` needs the activeTab grant Chrome only gives on a real toolbar click, so a Screenshot test replaces the service worker's `captureVisibleTab` wrapper with a known image; the real capture is a manual check before release
@@ -239,13 +249,14 @@ if (currentUser && supabaseAuth?.isAuthenticated()) {
 - **API Keys**: User's OpenAI key stored in chrome.storage.sync (encrypted by Chrome)
 - **Sessions**: Supabase sessions stored in chrome.storage.local, auto-restored on startup
 - **OAuth**: Client ID in manifest.json is public (designed for OAuth), redirect URI locked to extension ID
-- **Data Flow**: All processing client-side except backend service (when implemented)
+- **Data Flow**: All processing client-side except the backend service (signed-in users without a key)
+- **Screenshots**: only the Region the user draws is captured; it is downscaled (≤ 1600 px, JPEG 0.7) before leaving the browser, sent to OpenAI directly (own key) or via the backend, and never written to storage — discarded after the Extraction. The privacy policy (`docs/index.html`) and the Web Store material (`docs/CHROME_WEB_STORE_UPDATE.md`) state this; keep them in step with any change here
 - **Supabase Keys**: Public anon key in config.js is safe to expose (designed for client-side use)
 
 ### Extension Permissions
 - `contextMenus`: Right-click menu integration
-- `storage`: API key and session persistence
-- `activeTab`: Access selected text on active tab
+- `storage`: API key and `showScreenshotMenuItem` toggle (sync), session and usage persistence (local)
+- `activeTab`: Access selected text on the active tab, and capture the visible tab when the user starts a Screenshot from the popup or the context-menu item (both are user gestures that grant activeTab). No permission was added for Screenshots; only the Web Store justification text changed
 - `scripting`: Dynamic content script injection
 - `identity`: Chrome Identity API for Google OAuth
 - `host_permissions`: Supabase API access (https://*.supabase.co/*)

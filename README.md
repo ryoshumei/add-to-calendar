@@ -6,7 +6,7 @@
 ## English
 
 ### Overview
-Calendar Event Creator is a Chrome extension that helps you quickly create Google Calendar events from selected text using OpenAI's natural language processing capabilities. The extension now features Google OAuth authentication and a backend service powered by Supabase Edge Functions.
+Calendar Event Creator is a Chrome extension that helps you quickly create Google Calendar events from selected text, or from a screenshot of part of a page, using OpenAI's natural language and vision capabilities. The extension now features Google OAuth authentication and a backend service powered by Supabase Edge Functions.
 
 ### Features
 - **Google Authentication**: Sign in with Google for seamless experience
@@ -17,6 +17,7 @@ Calendar Event Creator is a Chrome extension that helps you quickly create Googl
 - **Multi-Event Extraction**: Extract multiple events from a single text selection
 - **Auto Timezone Detection**: Automatically uses your browser's timezone
 - **Right-click Context Menu**: Create events from selected text
+- **Screenshot Source**: Click "Capture screenshot" in the popup or right-click "Add screenshot to Google Calendar", draw a box over the part of the page that holds the event (a poster, an embedded calendar, a chat screenshot), and the extension extracts events from just that region. Esc cancels; Enter or a double-click sends the whole visible tab. Only the box you draw leaves the browser, downscaled, and it is discarded after extraction
 - **Automatic Extraction**: Intelligently extracts event details (title, time, location, etc.)
 - **Draggable Modal**: Reposition the confirmation window by dragging
 - **Quick Preview**: Review and confirm before adding to calendar
@@ -50,10 +51,17 @@ Calendar Event Creator is a Chrome extension that helps you quickly create Googl
    - Drag the modal header to reposition it
 4. Click "Add to Calendar" for each event you want to add
 
+**From a screenshot**
+1. Click the extension icon and "Capture screenshot", or right-click anywhere and choose "Add screenshot to Google Calendar"
+2. Drag a box over the event details and release; press Esc to cancel, or Enter / double-click to send the whole visible tab
+3. The confirmation modal shows the extracted events and a thumbnail of what was read
+4. Click "Add to Calendar" for each event. Signed-in users spend one request of the monthly allowance per screenshot, the same as text
+5. A popup setting hides the right-click screenshot item if you only use the popup button
+
 The extension intelligently chooses the best processing method:
 - If you set an API key → Uses your key
 - If you're signed in → Uses our backend service
-- Otherwise → Creates a basic event
+- Otherwise → Creates a basic event (text only; a screenshot with neither a key nor a sign-in shows the setup prompt instead)
 
 ### Technical Requirements
 - Chrome Browser (Latest version recommended)
@@ -65,8 +73,8 @@ The extension intelligently chooses the best processing method:
 
 ```
 add-to-calendar/
-├── background.js       # Service worker (context menu, OpenAI processing)
-├── content.js          # Content script (modal UI, drag functionality)
+├── background.js       # Service worker (context menus, screenshot capture, OpenAI processing)
+├── content.js          # Content script (modal UI, region overlay, drag functionality)
 ├── manifest.json       # Extension manifest (V3)
 ├── popup/              # Extension popup UI
 │   ├── popup.html
@@ -74,10 +82,14 @@ add-to-calendar/
 │   └── popup.css
 ├── scripts/            # Services
 │   ├── supabase-client.js  # Authentication service
-│   └── calendar-service.js # Calendar URL generation
+│   ├── calendar-service.js # Calendar URL generation
+│   ├── llm-prompt.js       # Prompt + request builders (text and image), synced with the backend
+│   ├── screenshot-pipeline.js # Crop to the drawn region, downscale, encode JPEG
+│   └── backend-config.js   # Resolves backend/OpenAI URLs (test override, inert in production)
 ├── supabase/           # Backend (Supabase Edge Functions)
 │   └── functions/
-│       └── process-text/   # Text processing Edge Function
+│       ├── process-text/   # Text processing Edge Function
+│       └── process-image/  # Screenshot processing Edge Function
 ├── tests/              # Playwright E2E tests
 └── docs/               # Documentation
 ```
@@ -96,7 +108,7 @@ add-to-calendar/
 
 1. **User's API Key** (if set): Uses client-side processing with your OpenAI key
 2. **Backend Service** (if authenticated): Uses our backend for processing
-3. **Basic Fallback**: Creates simple events without AI processing
+3. **Basic Fallback**: Creates simple events without AI processing (text only; screenshots have no fallback and show an error instead)
 
 ### Notes
 - The extension processes text using OpenAI's GPT-4.1-mini model
@@ -104,6 +116,7 @@ add-to-calendar/
 - Backend processing keeps your API usage private
 - Authentication sessions persist across browser restarts
 - All processing is done server-side or client-side (no data retention)
+- Screenshots: only the region you draw is captured, downscaled in the browser (longest side 1600 px, JPEG) before it is sent, and discarded after extraction
 
 ### Developer Documentation
 - [Deployment Guide](docs/DEPLOYMENT.md) - Backend and extension deployment
@@ -116,7 +129,7 @@ add-to-calendar/
 ## 日本語
 
 ### 概要
-Calendar Event Creatorは、OpenAIの自然言語処理機能を使用して、選択したテキストからGoogle Calendarのイベントをすばやく作成できるChrome拡張機能です。Google OAuth認証とSupabase Edge Functionsによるバックエンドサービスを搭載しています。
+Calendar Event Creatorは、OpenAIの自然言語処理・画像認識機能を使用して、選択したテキストやページの一部のスクリーンショットからGoogle Calendarのイベントをすばやく作成できるChrome拡張機能です。Google OAuth認証とSupabase Edge Functionsによるバックエンドサービスを搭載しています。
 
 ### 機能
 - **Google認証**: Googleでサインインしてシームレスな体験
@@ -125,6 +138,7 @@ Calendar Event Creatorは、OpenAIの自然言語処理機能を使用して、�
   - バックエンドサービス処理（サインイン時はAPIキー不要）
   - 基本フォールバック処理
 - **複数イベント抽出**: 1つのテキストから複数のイベントを抽出
+- **スクリーンショットから作成**: ポップアップの「Capture screenshot」または右クリックの「Add screenshot to Google Calendar」で、ページ上のイベント部分（ポスター、埋め込みカレンダー、チャットの画面など）を枠で囲むと、その範囲だけからイベントを抽出。Escでキャンセル、Enterまたはダブルクリックで表示中のタブ全体を送信。送信されるのは囲んだ範囲だけで、ブラウザ内で縮小され、抽出後に破棄されます
 - **タイムゾーン自動検出**: ブラウザのタイムゾーンを自動適用
 - **ドラッグ可能なモーダル**: 確認ウィンドウをドラッグで移動可能
 - イベントの詳細（タイトル、時間、場所など）の自動抽出
@@ -157,6 +171,13 @@ Calendar Event Creatorは、OpenAIの自然言語処理機能を使用して、�
    - モーダルヘッダーをドラッグして位置を移動可能
 4. 追加したいイベントの「Add to Calendar」をクリック
 
+**スクリーンショットから**
+1. 拡張機能のアイコンをクリックして「Capture screenshot」を押すか、ページ上で右クリックして「Add screenshot to Google Calendar」を選択
+2. イベント情報をドラッグで囲んで離すとキャプチャ。Escでキャンセル、Enterまたはダブルクリックで表示中のタブ全体を送信
+3. 確認モーダルに抽出されたイベントと、読み取った範囲のサムネイルが表示
+4. 追加したいイベントの「Add to Calendar」をクリック。サインイン時はテキストと同じく月間利用枠を1回分消費
+5. ポップアップの設定で右クリックメニューの項目を非表示にできます
+
 ### 技術要件
 - Chromeブラウザ（最新版推奨）
 - Googleアカウント（認証用、オプション）
@@ -168,6 +189,7 @@ Calendar Event Creatorは、OpenAIの自然言語処理機能を使用して、�
 - APIキーはChromeの同期ストレージに安全に保存（Chrome暗号化）
 - バックエンド処理でAPIキーのプライバシーを保護
 - 認証セッションはブラウザ再起動後も維持
+- スクリーンショットは囲んだ範囲だけがキャプチャされ、ブラウザ内で縮小（長辺1600px、JPEG）してから送信、抽出後に破棄されます
 
 ---
 
@@ -184,6 +206,7 @@ Calendar Event Creator 是一个 Chrome 扩展程序，它使用 OpenAI 的自�
   - 后端服务处理（登录后无需 API 密钥）
   - 基本回退处理
 - **多事件提取**: 从一段文本中提取多个事件
+- **截图来源**: 在弹出窗口点击「Capture screenshot」或右键选择「Add screenshot to Google Calendar」，框选页面上包含活动信息的区域（海报、嵌入式日历、聊天截图等），扩展只从该区域提取事件。Esc 取消，Enter 或双击发送整个可见标签页。只有框选的区域会离开浏览器，且会先缩小、提取后即丢弃
 - **时区自动检测**: 自动使用浏览器时区
 - **可拖动弹窗**: 可通过拖动移动确认窗口
 - 自动提取事件详情（标题、时间、地点等）
