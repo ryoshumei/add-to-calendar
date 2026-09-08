@@ -87,7 +87,10 @@ async function loadPipeline(page) {
           width: decoded.naturalWidth,
           height: decoded.naturalHeight,
           centrePixel: [centre[0], centre[1], centre[2]],
-          encodedBytes: Math.floor((base64.length * 3) / 4),
+          // The JPEG itself, and the data URL that carries it — base64 makes
+          // the second about a third bigger than the first.
+          jpegBytes: Math.floor((base64.length * 3) / 4),
+          sentLength: dataUrl.length,
         };
       },
       { capture, pattern, region, devicePixelRatio, options }
@@ -99,7 +102,10 @@ function expectColour(pixel, expected) {
   const worstChannel = Math.max(
     ...pixel.map((value, index) => Math.abs(value - expected[index]))
   );
-  expect(worstChannel, `expected ${expected} but the crop is ${pixel}`).toBeLessThanOrEqual(12);
+  expect(
+    worstChannel,
+    `expected ${expected} but the Screenshot's centre is ${pixel}`
+  ).toBeLessThanOrEqual(12);
 }
 
 // The capture is drawn as four flat quadrants, so a cropped colour names the
@@ -214,6 +220,22 @@ test.describe('Screenshot pipeline', () => {
       capture: { width: 2400, height: 1200 },
       options: { maxEncodedBytes: 5000 },
     });
+
+    expect(result.error).toMatch(/too large/i);
+  });
+
+  test('measures the cap against what is sent, not the JPEG behind it', async ({ sourcePage }) => {
+    const run = await loadPipeline(sourcePage);
+    const capture = { width: 2400, height: 1200 };
+
+    const sent = await run({ capture });
+    expect(sent.error).toBeUndefined();
+    expect(sent.sentLength).toBeGreaterThan(sent.jpegBytes);
+
+    // A cap the JPEG fits under and the data URL does not: what leaves the
+    // browser is the data URL, so this Screenshot is over the cap.
+    const cap = Math.round((sent.jpegBytes + sent.sentLength) / 2);
+    const result = await run({ capture, options: { maxEncodedBytes: cap } });
 
     expect(result.error).toMatch(/too large/i);
   });

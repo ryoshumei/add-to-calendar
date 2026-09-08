@@ -12,9 +12,10 @@
         // The longest side of the Screenshot that is sent for Extraction.
         MAX_EDGE_PX: 1600,
         JPEG_QUALITY: 0.7,
-        // A Screenshot this large never survives the downscale above, so
-        // passing it on would mean something went wrong; the Extraction is
-        // refused instead.
+        // The cap on the data URL that is sent — base64 and all, since that
+        // is what crosses the wire. A Screenshot this large never survives
+        // the downscale above, so passing it on would mean something went
+        // wrong; the Extraction is refused instead.
         MAX_ENCODED_BYTES: 10 * 1024 * 1024,
 
         /**
@@ -37,23 +38,31 @@
             const capture = await createImageBitmap(await (await fetch(captureDataUrl)).blob());
 
             try {
-                const crop = toCaptureRect(region, devicePixelRatio, capture);
-                const scale = Math.min(1, maxEdgePx / Math.max(crop.width, crop.height));
-                const width = Math.max(1, Math.round(crop.width * scale));
-                const height = Math.max(1, Math.round(crop.height * scale));
+                const deviceRegion = toCaptureRect(region, devicePixelRatio, capture);
+                const scale = Math.min(
+                    1,
+                    maxEdgePx / Math.max(deviceRegion.width, deviceRegion.height)
+                );
+                const width = Math.max(1, Math.round(deviceRegion.width * scale));
+                const height = Math.max(1, Math.round(deviceRegion.height * scale));
 
                 const canvas = new OffscreenCanvas(width, height);
                 canvas.getContext('2d').drawImage(
                     capture,
-                    crop.x, crop.y, crop.width, crop.height,
+                    deviceRegion.x, deviceRegion.y, deviceRegion.width, deviceRegion.height,
                     0, 0, width, height
                 );
 
                 const blob = await canvas.convertToBlob({ type: 'image/jpeg', quality });
-                if (blob.size > maxEncodedBytes) {
+                const dataUrl = await blobToDataUrl(blob);
+
+                // Measured on the data URL rather than the blob behind it:
+                // base64 makes it about a third larger, and the data URL is
+                // what is sent.
+                if (dataUrl.length > maxEncodedBytes) {
                     throw new Error('The Screenshot is too large to send.');
                 }
-                return await blobToDataUrl(blob);
+                return dataUrl;
             } finally {
                 capture.close();
             }

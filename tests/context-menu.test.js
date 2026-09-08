@@ -84,12 +84,17 @@ test.describe('The setting that hides it', () => {
   }) => {
     const popupPage = await openPopup(context, extensionId);
     await waitForPopupReady(popupPage);
+    // The checkbox ships checked and disabled, and is enabled once the stored
+    // setting has been read: asserted before that, "checked" would be the
+    // static HTML answering rather than storage.
+    await expect(popupPage.locator(TOGGLE)).toBeEnabled();
     await expect(popupPage.locator(TOGGLE)).toBeChecked();
 
     await popupPage.locator(TOGGLE).uncheck();
 
     const reopened = await openPopup(context, extensionId);
     await waitForPopupReady(reopened);
+    await expect(reopened.locator(TOGGLE)).toBeEnabled();
     await expect(reopened.locator(TOGGLE)).not.toBeChecked();
 
     // Sync storage, not local: the choice follows the user's Chrome profile
@@ -98,6 +103,29 @@ test.describe('The setting that hides it', () => {
       chrome.storage.sync.get({ showScreenshotMenuItem: true })
     );
     expect(stored.showScreenshotMenuItem).toBe(false);
+  });
+
+  test('goes back to what is stored when the setting cannot be saved', async ({
+    context,
+    extensionId,
+  }) => {
+    const popupPage = await openPopup(context, extensionId);
+    await waitForPopupReady(popupPage);
+    await expect(popupPage.locator(TOGGLE)).toBeEnabled();
+
+    // Sync storage full, offline, a quota hit: whatever the reason, the save
+    // did not happen.
+    await popupPage.evaluate(() => {
+      chrome.storage.sync.set = () => Promise.reject(new Error('QUOTA_BYTES quota exceeded'));
+    });
+
+    // A click, not uncheck(): the state the user is left in is the assertion.
+    await popupPage.locator(TOGGLE).click();
+
+    // The item is still on the menu, so the checkbox says so.
+    await expect(popupPage.locator(TOGGLE)).toBeChecked();
+    await expect(popupPage.locator('#message')).toContainText('Could not save that setting');
+    await expectMenuItem(context, SCREENSHOT_ITEM, true);
   });
 
   test('takes the item off the menu and puts it back, with no reload in between', async ({

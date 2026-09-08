@@ -73,6 +73,10 @@ document.addEventListener('DOMContentLoaded', async () => {
                     [SCREENSHOT_MENU_ITEM_SETTING]: screenshotMenuToggle.checked
                 });
             } catch (error) {
+                // The menu is built from storage, so a checkbox left showing
+                // the change describes a menu the user does not have: it goes
+                // back to what was actually saved.
+                await loadScreenshotMenuSetting(screenshotMenuToggle);
                 showMessage('Could not save that setting: ' + error.message, 'error');
             }
         });

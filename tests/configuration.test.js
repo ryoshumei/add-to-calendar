@@ -1,5 +1,14 @@
 // tests/configuration.test.js
 import { test, expect } from './fixtures/extension-fixtures.js';
+import fs from 'fs';
+import path from 'path';
+
+// The version in package.json, read from disk: the release number the manifest
+// has to agree with.
+function packageVersion() {
+  const packageFile = path.resolve(__dirname, '..', 'package.json');
+  return JSON.parse(fs.readFileSync(packageFile, 'utf-8')).version;
+}
 
 test.describe('Configuration Management', () => {
   test.describe('CONFIG Object Loading', () => {
@@ -195,9 +204,10 @@ test.describe('Configuration Management', () => {
       // Check manifest version
       expect(manifestPermissions.manifestVersion).toBe(3);
 
-      // Extension version shipped with the Screenshot Source (1.3.0); the
-      // backend reads it from the X-Extension-Version header
-      expect(manifestPermissions.version).toBe('1.3.0');
+      // The version the backend reads from the X-Extension-Version header is
+      // the manifest's, and package.json says the same thing: one number to
+      // bump per release, checked here rather than left to drift.
+      expect(manifestPermissions.version).toBe(packageVersion());
     });
 
     test('should have valid OAuth client ID format', async ({ context }) => {
@@ -427,6 +437,29 @@ test.describe('Configuration Management', () => {
       // never post their Source anywhere but OpenAI.
       expect(resolved.storedOverride).toBeNull();
       expect(resolved.openAiUrl).toBe('https://api.openai.com/v1/chat/completions');
+    });
+  });
+
+  test.describe('Authentication start-up', () => {
+    test('starts auth once per worker, however many times it is asked', async ({ context }) => {
+      const [serviceWorker] = context.serviceWorkers();
+
+      // Two auth clients in one worker sign the user out from under each
+      // other: each restores the stored session and each clears it on the way
+      // out. Every wake-up, install and browser start means "make sure auth is
+      // ready", so they all have to land on the same client.
+      const sameClient = await serviceWorker.evaluate(async () => {
+        await initializeAuth();
+        const first = supabaseAuth;
+
+        await initializeAuth();
+        await initializeAuth();
+
+        return { same: supabaseAuth === first, built: Boolean(first) };
+      });
+
+      expect(sameClient.built).toBe(true);
+      expect(sameClient.same).toBe(true);
     });
   });
 });

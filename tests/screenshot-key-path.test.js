@@ -155,6 +155,30 @@ test.describe('Screenshot Extraction (own OpenAI key)', () => {
     await expect(sourcePage.locator('.calendar-modal-overlay .event-card')).toHaveCount(0);
   });
 
+  test('a key OpenAI refuses is a key problem, not an expired Google session', async ({
+    context,
+    extensionId,
+    stubBackend,
+    sourcePage,
+    signedIn,
+    ownKey,
+  }) => {
+    // OpenAI's own wording for a rejected key is the wording the Supabase
+    // mapping reads as an expired session — and this user's session is fine.
+    stubBackend.openAiResponse = {
+      status: 401,
+      body: { error: { message: 'Unauthorized: incorrect API key provided' } },
+    };
+    await standInForCapture(context, sourcePage);
+    await captureFromPopup(context, extensionId, sourcePage);
+
+    await expect(sourcePage.locator('.calendar-modal-overlay .extraction-error')).toContainText(
+      'Unauthorized: incorrect API key provided'
+    );
+    // Signing in to Google again fixes nothing here, so nothing offers it.
+    await expect(sourcePage.locator('.calendar-modal-overlay .signin-button')).toHaveCount(0);
+  });
+
   test('an OpenAI failure is reported, and never reaches the backend', async ({
     context,
     extensionId,

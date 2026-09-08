@@ -56,7 +56,12 @@ async function startAuth() {
         console.error('❌ Failed to initialize authentication:', error);
         // A failure is not remembered: the next caller starts auth again
         // rather than leaving the worker without it for the rest of its life.
+        // The half-built client goes with it, so that caller builds one
+        // instead of inheriting a client that never finished starting.
         authStartUp = null;
+        supabaseAuth = null;
+        calendarService = null;
+        currentUser = null;
     }
 }
 
@@ -319,6 +324,11 @@ async function handleContextMenuClick(info, tab) {
             return;
         }
 
+        // Whether this Extraction ran on the user's own OpenAI key, which
+        // decides how a failure is read in the catch below: a key path never
+        // touched Supabase, so nothing it fails with is a session problem.
+        let usedOwnKey = false;
+
         try {
             // Mark this tab as having an active request
             activeRequests.add(tab.id);
@@ -326,7 +336,7 @@ async function handleContextMenuClick(info, tab) {
             const selectedText = info.selectionText;
             let eventDetails;
             let result;
-            
+
             // Log current auth state for debugging
             console.log('📊 Auth state check:', {
                 hasCurrentUser: !!currentUser,
@@ -348,6 +358,7 @@ async function handleContextMenuClick(info, tab) {
                     // Use user's API key (they prefer their own key)
                     console.log('Using user\'s OpenAI API key');
                     await updateStatusMessage(tab.id, 'Analyzing event details...', 'Using your OpenAI API key');
+                    usedOwnKey = true;
                     eventDetails = await processWithOpenAI(selectedText, apiKey);
                 } else {
                     // Priority 2: Use backend service with our API key
@@ -393,6 +404,7 @@ async function handleContextMenuClick(info, tab) {
                 // Process with OpenAI and create calendar URL
                 console.log('✅ Using API key for processing');
                 await updateStatusMessage(tab.id, 'Analyzing event details...', 'Using your OpenAI API key');
+                usedOwnKey = true;
                 eventDetails = await processWithOpenAI(selectedText, apiKey);
                 
                 await updateStatusMessage(tab.id, 'Creating calendar event...', 'Almost done');
@@ -433,12 +445,14 @@ async function handleContextMenuClick(info, tab) {
             }
         } catch (error) {
             console.error("Error processing text:", error);
-            
+
             // Hide status modal
             await hideStatusMessage(tab.id);
-            
-            // Check if it's an auth error
-            if (isAuthError(error)) {
+
+            // Check if it's an auth error. Not on the key path: OpenAI
+            // refusing a key is not a Google session that expired, and the
+            // sign-in modal would send the user somewhere that cannot fix it.
+            if (!usedOwnKey && isAuthError(error)) {
                 await showAuthError(tab.id, error.message);
             } else {
                 chrome.notifications.create({
@@ -460,6 +474,24 @@ async function handleContextMenuClick(info, tab) {
 const CANNOT_CAPTURE_MESSAGE =
     'This page cannot be captured. Chrome does not allow screenshots of browser pages such as chrome:// or the Web Store.';
 
+// The two ways a Screenshot is refused before anything is captured, shared by
+// the trigger that opens the Region overlay and the capture that follows it:
+// a page there is no capturing, and — the same per-tab guard the Selection
+// flow uses — a tab already in the middle of an Extraction, whose second
+// trigger is ignored rather than charged. Null means carry on.
+function screenshotRefusal(tab) {
+    if (!tab) {
+        return { success: false, error: CANNOT_CAPTURE_MESSAGE, showInPopup: true };
+    }
+
+    if (activeRequests.has(tab.id)) {
+        console.log('Request already in progress for this tab');
+        return { success: false, ignored: true };
+    }
+
+    return null;
+}
+
 // Capture the visible area of the tab. Split out because Chrome only grants
 // the activeTab permission this needs on a real user gesture, which a test
 // browser cannot produce — a test stands in for this one call.
@@ -472,16 +504,8 @@ async function captureVisibleTab(tab) {
 // the overlay is a page Chrome would refuse to capture anyway, so that is
 // reported to the popup while it is still open to show it.
 async function startRegionCapture(tab) {
-    if (!tab) {
-        return { success: false, error: CANNOT_CAPTURE_MESSAGE, showInPopup: true };
-    }
-
-    // The same per-tab guard the Selection flow uses: a trigger while one
-    // Extraction is in flight is ignored rather than charged.
-    if (activeRequests.has(tab.id)) {
-        console.log('Request already in progress for this tab');
-        return { success: false, ignored: true };
-    }
+    const refusal = screenshotRefusal(tab);
+    if (refusal) return refusal;
 
     try {
         await sendToContentScript(tab.id, { type: 'SHOW_REGION_OVERLAY' });
@@ -496,16 +520,8 @@ async function startRegionCapture(tab) {
 // on it. The Region is in CSS pixels, or null for the whole visible tab; the
 // device pixel ratio is what the capture is measured in.
 async function handleScreenshotCapture(tab, region = null, devicePixelRatio = 1) {
-    if (!tab) {
-        return { success: false, error: CANNOT_CAPTURE_MESSAGE, showInPopup: true };
-    }
-
-    // The same per-tab guard the Selection flow uses: a second trigger while
-    // one Extraction is in flight is ignored rather than charged.
-    if (activeRequests.has(tab.id)) {
-        console.log('Request already in progress for this tab');
-        return { success: false, ignored: true };
-    }
+    const refusal = screenshotRefusal(tab);
+    if (refusal) return refusal;
 
     activeRequests.add(tab.id);
 
@@ -551,7 +567,7 @@ async function handleScreenshotCapture(tab, region = null, devicePixelRatio = 1)
             );
 
             const eventDetails = apiKey
-                ? await processImageWithOpenAI(screenshot, apiKey)
+                ? await processScreenshotWithOpenAI(screenshot, apiKey)
                 : await processImageWithBackend(screenshot, supabaseAuth.getAccessToken());
 
             await hideStatusMessage(tab.id);
@@ -569,7 +585,11 @@ async function handleScreenshotCapture(tab, region = null, devicePixelRatio = 1)
             console.error('Error extracting from the Screenshot:', error);
             await hideStatusMessage(tab.id);
 
-            if (isAuthError(error)) {
+            // Only the backend path can hit a Google session problem. On the
+            // key path the Extraction never went near Supabase, so an OpenAI
+            // error that happens to say "unauthorized" is about their key —
+            // asking them to sign in again would send them nowhere useful.
+            if (!apiKey && isAuthError(error)) {
                 await showAuthError(tab.id, error.message);
             } else {
                 await showExtractionError(tab.id, error.message);
@@ -910,11 +930,11 @@ async function processWithOpenAI(text, apiKey) {
 // never reaches the shared backend, which is what a saved key buys them on the
 // Selection path too. The error is reported as it came, so a key problem does
 // not read as a session problem.
-async function processImageWithOpenAI(imageDataUrl, apiKey) {
+async function processScreenshotWithOpenAI(screenshotDataUrl, apiKey) {
     const currentDateTime = new Date().toLocaleString();
 
     return extractWithOpenAI(
-        LLM_CONFIG.buildImageRequestBody(imageDataUrl, currentDateTime),
+        LLM_CONFIG.buildImageRequestBody(screenshotDataUrl, currentDateTime),
         apiKey
     );
 }
