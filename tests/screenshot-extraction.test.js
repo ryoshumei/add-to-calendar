@@ -215,11 +215,15 @@ test.describe('Screenshot Extraction (stub backend)', () => {
     sourcePage,
   }) => {
     await standInForCapture(context, sourcePage);
-    await captureFromPopup(context, extensionId, sourcePage);
 
+    await triggerCapture(context, extensionId, sourcePage);
+
+    // Before the drawing, not after: with nothing to send a Region to, the
+    // overlay never opens.
     await expect(sourcePage.locator('.calendar-modal-overlay .status-modal.error h3')).toContainText(
       'Setup Required'
     );
+    await expect(sourcePage.locator(OVERLAY)).toHaveCount(0);
     expect(stubBackend.requestsTo(PROCESS_IMAGE_PATH, 'POST')).toHaveLength(0);
   });
 });

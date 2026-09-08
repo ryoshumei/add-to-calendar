@@ -33,6 +33,11 @@ IMPROVEMENTS:
 ```
 
 ### Store listing additions
+The **summary** under the extension's name is `manifest.json`'s `description`,
+not a dashboard field: this release ships "Create Google Calendar events from
+selected text or a screenshot using OpenAI", so the summary names both Sources
+as soon as the package is uploaded. Nothing to type there.
+
 Add to **KEY FEATURES**:
 ```
 • Screenshot any part of a page — posters, embedded calendars, chat screenshots, PDFs — and turn it into events
@@ -135,12 +140,15 @@ zip -r calendar-event-creator-v$(grep -o '"version": *"[^"]*"' manifest.json | g
 
 **Short Description** (132 characters max):
 ```
-Create Google Calendar events from selected text using AI. Sign in with Google for 50 free events/month!
+Create Google Calendar events from selected text or a screenshot using AI. Sign in with Google for 50 free events/month!
 ```
+
+Note: the dashboard's summary field is `manifest.json`'s `description`, not an
+editable listing field — keep the two saying the same thing.
 
 **Detailed Description**:
 ```
-Calendar Event Creator helps you quickly add events to Google Calendar from any selected text on the web.
+Calendar Event Creator helps you quickly add events to Google Calendar from any selected text on the web, or from a screenshot of the part of a page that holds the event.
 
 🎯 KEY FEATURES:
 • Create calendar events from natural language text

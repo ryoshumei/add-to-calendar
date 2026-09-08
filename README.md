@@ -197,7 +197,7 @@ Calendar Event Creatorは、OpenAIの自然言語処理・画像認識機能を�
 ## 中文
 
 ### 概述
-Calendar Event Creator 是一个 Chrome 扩展程序，它使用 OpenAI 的自然语言处理功能，帮助您快速从选定文本创建 Google 日历事件。现已支持 Google OAuth 认证和 Supabase Edge Functions 后端服务。
+Calendar Event Creator 是一个 Chrome 扩展程序，它使用 OpenAI 的自然语言处理与图像识别功能，帮助您快速从选定文本或页面局部的截图创建 Google 日历事件。现已支持 Google OAuth 认证和 Supabase Edge Functions 后端服务。
 
 ### 特点
 - **Google 认证**: 使用 Google 登录，享受无缝体验

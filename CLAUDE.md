@@ -42,9 +42,9 @@ Chrome extension that creates Google Calendar events from a Source the user poin
 
 **Screenshot (either mode):**
 1. User clicks "Capture screenshot" in the popup (the popup then closes) or right-clicks → "Add screenshot to Google Calendar" (available on any page, with or without a Selection; hidden by the popup toggle stored as `showScreenshotMenuItem` in sync storage, default on — the service worker re-registers its menus on change)
-2. background.js injects the Region overlay into the active tab (same inject-and-retry as the modal). Drag draws the Region; mouse-up submits it; Esc or a drag under 10 px cancels; Enter or double-click submits the whole visible tab. The overlay hides itself (and any open modal) and waits a frame before reporting, so it never appears in the capture. The Region is reported with the device pixel ratio
+2. background.js checks there is a way to extract at all (own key or session) and shows the setup-required modal instead if there is neither, then injects the Region overlay into the active tab (same inject-and-retry as the modal). Drag draws the Region; mouse-up submits it; Esc or a drag under 10 px cancels; Enter or double-click submits the whole visible tab. The overlay hides itself (and any open modal) and waits a frame before reporting, so it never appears in the capture. Only trusted events drive it — input a page script dispatched is ignored, so a page cannot spend a request on a Screenshot of the tab. The Region is reported with the device pixel ratio
 3. background.js captures the visible tab (`chrome.tabs.captureVisibleTab`, allowed by the existing activeTab grant — no permission was added) and runs the Screenshot pipeline: crop to Region × dpr, downscale so the longest side is ≤ 1600 px, JPEG quality 0.7; an encoded result over 10 MB is an error
-4. **Priority logic is the same as text**: user's OpenAI key (`processScreenshotWithOpenAI`, request built by `LLM_CONFIG.buildImageRequestBody`) > backend `process-image` endpoint (`processImageWithBackend`, sends the data URL, current date-time and the `X-Extension-Version` header; stores returned usage like text) > setup-required modal. **No basic fallback**: a failed Extraction shows an error in the modal. Any active Selection is ignored; one Source per Extraction
+4. **Priority logic is the same as text**: user's OpenAI key (`processScreenshotWithOpenAI`, request built by `LLM_CONFIG.buildImageRequestBody`) > backend `process-image` endpoint (`processImageWithBackend`, sends the data URL, current date-time and the `X-Extension-Version` header; stores returned usage like text). Having one of the two was settled at step 2. **No basic fallback**: a failed Extraction shows an error in the modal. Any active Selection is ignored; one Source per Extraction
 5. content.js shows the confirmation modal with the Events plus a thumbnail of the sent Region (attached through the DOM, not string HTML). The image lives only for the one Extraction; nothing is written to storage
 6. The same per-tab in-flight guard as Selection ignores a second capture while one is processing. Pages Chrome will not capture (browser pages, the Web Store) show a plain "cannot capture" error
 
@@ -212,7 +212,7 @@ OPENAI_API_KEY=sk-... npm run eval:screenshot
 - Visual indicator: Color-coded progress bar (green → yellow → orange → red as usage increases)
 
 ### Extraction paths
-A Screenshot follows the same priority as a Selection (`background.js:handleScreenshotCapture`): the user's own OpenAI key first (`processScreenshotWithOpenAI`, built by `LLM_CONFIG.buildImageRequestBody` — the Region never reaches the shared backend), the backend second (`processImageWithBackend`), and with neither a key nor a session, the setup-required modal. A Screenshot has no basic fallback: a failed Extraction is an error the user sees.
+A Screenshot follows the same priority as a Selection (`background.js:handleScreenshotCapture`): the user's own OpenAI key first (`processScreenshotWithOpenAI`, built by `LLM_CONFIG.buildImageRequestBody` — the Region never reaches the shared backend), the backend second (`processImageWithBackend`), and with neither a key nor a session the trigger stops at the setup-required modal before the overlay opens (`background.js:startRegionCapture`). A Screenshot has no basic fallback: a failed Extraction is an error the user sees.
 
 ### Backend Service Integration
 **Implemented** (background.js:processWithBackend):
@@ -239,7 +239,7 @@ if (currentUser && supabaseAuth?.isAuthenticated()) {
 - Throws error if monthly limit exceeded
 
 ### OpenAI Integration
-- Model: gpt-4.1-mini (configurable in background.js:219)
+- Model: gpt-4.1-mini (`LLM_CONFIG.model` in `scripts/llm-prompt.js`, mirrored in `supabase/functions/_shared/llm-prompt.ts`)
 - System prompt enforces JSON-only responses with specific schema
 - Temperature: 0.3 for consistent JSON output
 - Current time passed as reference for relative date parsing
@@ -263,7 +263,7 @@ if (currentUser && supabaseAuth?.isAuthenticated()) {
 
 ### Common Modifications
 - **LLM Prompt / Model**: Edit `scripts/llm-prompt.js` (client-side) and `supabase/functions/_shared/llm-prompt.ts` (backend) — these must be kept in sync (CI enforces byte-identical prompts via `tests/llm-prompt-sync.test.js`). Run `npm run eval:prompt` and `npm run eval:screenshot` before deploying prompt changes
-- **UI Styling**: Edit CSS in content.js:8-72 for modal appearance
+- **UI Styling**: Edit the injected stylesheet at the top of `content.js` (the `style.textContent` template) for the modal and the Region overlay
 - **Supabase Config**: Update SUPABASE_URL and SUPABASE_ANON_KEY in config.js
 - **OAuth Client**: Update oauth2.client_id in manifest.json (requires new Google Cloud OAuth app)
 

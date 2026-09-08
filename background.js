@@ -302,8 +302,9 @@ async function handleContextMenuClick(info, tab) {
 
         // No popup is open on this trigger, and the page that could not run
         // the overlay cannot show a modal either, so this is the one surface
-        // left for saying why nothing happened.
-        if (result && !result.success && result.error) {
+        // left for saying why nothing happened — unless the page has already
+        // said it, which is what reportedOnPage means.
+        if (result && !result.success && result.error && !result.reportedOnPage) {
             chrome.notifications.create({
                 type: 'basic',
                 iconUrl: 'icons/icon128.png',
@@ -499,6 +500,14 @@ async function captureVisibleTab(tab) {
     return chrome.tabs.captureVisibleTab(tab.windowId, { format: 'png' });
 }
 
+// What a Screenshot can be extracted with: the user's own OpenAI key, or a
+// Google session that spends one of their monthly requests. With neither,
+// there is nothing to send a Screenshot to.
+async function hasAWayToExtract() {
+    const { apiKey } = await chrome.storage.sync.get('apiKey');
+    return Boolean(apiKey) || Boolean(currentUser && supabaseAuth?.isAuthenticated());
+}
+
 // Open the Region overlay on the page and leave it there: the user draws a
 // Region, and the page reports it back for the capture. A page that cannot run
 // the overlay is a page Chrome would refuse to capture anyway, so that is
@@ -506,6 +515,21 @@ async function captureVisibleTab(tab) {
 async function startRegionCapture(tab) {
     const refusal = screenshotRefusal(tab);
     if (refusal) return refusal;
+
+    // Asked before the overlay opens, not after the Region is drawn: a user
+    // with neither a key nor a session gets the setup guidance instead of a
+    // drag that was never going to send anything.
+    if (!(await hasAWayToExtract())) {
+        console.log('ℹ️ No key and no session for a Screenshot — showing setup guidance');
+        await showSetupRequired(tab.id);
+        return {
+            success: false,
+            error: 'Sign in with Google or set your OpenAI API key to send a Screenshot.',
+            // The page is already saying so; the popup and the notification
+            // would only be saying it twice.
+            reportedOnPage: true
+        };
+    }
 
     try {
         await sendToContentScript(tab.id, { type: 'SHOW_REGION_OVERLAY' });
@@ -527,18 +551,9 @@ async function handleScreenshotCapture(tab, region = null, devicePixelRatio = 1)
 
     try {
         // Priority identical to a Selection: the user's own OpenAI key first,
-        // the shared backend second, and with neither, setup guidance.
+        // the shared backend second. Having one of the two was settled before
+        // the overlay opened, in startRegionCapture.
         const { apiKey } = await chrome.storage.sync.get('apiKey');
-        const hasSession = Boolean(currentUser && supabaseAuth?.isAuthenticated());
-
-        if (!apiKey && !hasSession) {
-            console.log('ℹ️ No key and no session for a Screenshot — showing setup guidance');
-            await showSetupRequired(tab.id);
-            return {
-                success: false,
-                error: 'Sign in with Google or set your OpenAI API key to send a Screenshot.'
-            };
-        }
 
         let capture;
         try {
@@ -568,7 +583,10 @@ async function handleScreenshotCapture(tab, region = null, devicePixelRatio = 1)
 
             const eventDetails = apiKey
                 ? await processScreenshotWithOpenAI(screenshot, apiKey)
-                : await processImageWithBackend(screenshot, supabaseAuth.getAccessToken());
+                // Optional chaining because signing out between the trigger
+                // and the drag leaves no client: that reads as the sign-in
+                // error it is, rather than a TypeError.
+                : await processImageWithBackend(screenshot, supabaseAuth?.getAccessToken());
 
             await hideStatusMessage(tab.id);
             await sendToContentScript(tab.id, {

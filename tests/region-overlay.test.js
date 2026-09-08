@@ -253,6 +253,36 @@ test.describe('Region overlay', () => {
     expect(await imageSize(sourcePage, post.body.image)).toEqual(WHOLE_TAB);
   });
 
+  test('input the page dispatched itself sends nothing', async ({
+    context,
+    extensionId,
+    stubBackend,
+    sourcePage,
+    signedIn,
+  }) => {
+    await standInForCapture(context, sourcePage, WHOLE_TAB);
+    await triggerCapture(context, extensionId, sourcePage);
+    await expect(sourcePage.locator(OVERLAY)).toBeVisible();
+
+    // A script on the page is not the user, and cannot spend one of their
+    // monthly requests on a Screenshot of their tab.
+    await sourcePage.evaluate(() => {
+      // Held before the first dispatch, so an overlay that wrongly took the
+      // Enter is reported by the assertions rather than by a missing element.
+      const overlay = document.querySelector('#calendar-region-overlay');
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+      overlay.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
+    });
+
+    // Still waiting for a real drag, which then works as it always did.
+    await expect(sourcePage.locator(OVERLAY)).toBeVisible();
+    await drawRegion(sourcePage, { x: 100, y: 120, width: 260, height: 160 });
+
+    await expect(sourcePage.locator('.calendar-modal-overlay .event-card')).toHaveCount(1);
+    expect(await capturesTaken(context)).toBe(1);
+    expect(stubBackend.requestsTo(PROCESS_IMAGE_PATH, 'POST')).toHaveLength(1);
+  });
+
   test('nothing the extension drew is on the page when the tab is captured', async ({
     context,
     extensionId,

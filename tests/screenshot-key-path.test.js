@@ -14,6 +14,8 @@ import {
   expect,
   standInForCapture,
   captureFromPopup,
+  capturesTaken,
+  triggerCapture,
 } from './fixtures/extension-fixtures.js';
 
 const OPENAI_PATH = '/v1/chat/completions';
@@ -85,11 +87,16 @@ test.describe('Screenshot Extraction (own OpenAI key)', () => {
     stubbedEndpoints,
   }) => {
     await standInForCapture(context, sourcePage);
-    await captureFromPopup(context, extensionId, sourcePage);
 
+    await triggerCapture(context, extensionId, sourcePage);
+
+    // Said before the drawing, not after: there is nothing to send a Region
+    // to, so the overlay never opens.
     await expect(
       sourcePage.locator('.calendar-modal-overlay .status-modal.error h3')
     ).toContainText('Setup Required');
+    await expect(sourcePage.locator('#calendar-region-overlay')).toHaveCount(0);
+    expect(await capturesTaken(context)).toBe(0);
     expect(stubBackend.requestsTo(OPENAI_PATH, 'POST')).toHaveLength(0);
     expect(stubBackend.requestsTo(PROCESS_IMAGE_PATH, 'POST')).toHaveLength(0);
   });

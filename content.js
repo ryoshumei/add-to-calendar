@@ -660,15 +660,29 @@ function showRegionOverlay() {
         }
     };
 
-    overlay.addEventListener('mousedown', onMouseDown);
-    overlay.addEventListener('dblclick', onDoubleClick);
-    window.addEventListener('mousemove', onMouseMove, true);
-    window.addEventListener('mouseup', onMouseUp, true);
-    window.addEventListener('keydown', onKeyDown, true);
+    // Only the user draws a Region. An event a page script dispatched is not
+    // the user: a synthetic Enter or double-click would send the visible tab
+    // and spend one of their monthly requests on a Screenshot they never
+    // asked for, so every handler here takes real input only.
+    const fromTheUser = (handler) => (event) => {
+        if (event.isTrusted) handler(event);
+    };
+
+    const mouseDown = fromTheUser(onMouseDown);
+    const doubleClick = fromTheUser(onDoubleClick);
+    const mouseMove = fromTheUser(onMouseMove);
+    const mouseUp = fromTheUser(onMouseUp);
+    const keyDown = fromTheUser(onKeyDown);
+
+    overlay.addEventListener('mousedown', mouseDown);
+    overlay.addEventListener('dblclick', doubleClick);
+    window.addEventListener('mousemove', mouseMove, true);
+    window.addEventListener('mouseup', mouseUp, true);
+    window.addEventListener('keydown', keyDown, true);
     state.removeListeners = () => {
-        window.removeEventListener('mousemove', onMouseMove, true);
-        window.removeEventListener('mouseup', onMouseUp, true);
-        window.removeEventListener('keydown', onKeyDown, true);
+        window.removeEventListener('mousemove', mouseMove, true);
+        window.removeEventListener('mouseup', mouseUp, true);
+        window.removeEventListener('keydown', keyDown, true);
     };
 
     regionOverlay = state;
