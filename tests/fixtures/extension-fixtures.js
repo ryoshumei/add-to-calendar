@@ -145,19 +145,10 @@ async function selectText(page, selector) {
   }, selector);
 }
 
-// Runs the Extraction the way Chrome does when the context-menu item is
-// clicked: the service worker's handler, given the front tab and the text the
-// user highlighted. Resolves once the flow has finished with the tab.
+// Runs the Extraction the way Chrome does when the Selection item is clicked.
+// Resolves once the flow has finished with the tab.
 async function extractFromSelection(context, page) {
-  const [serviceWorker] = context.serviceWorkers();
-  await page.bringToFront();
-  const selectionText = await page.evaluate(() => window.getSelection().toString());
-
-  return serviceWorker.evaluate(async (text) => {
-    const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
-    await handleContextMenuClick({ menuItemId: 'addToCalendar', selectionText: text }, tab);
-    return { tabId: tab.id, selectionText: text };
-  }, selectionText);
+  return clickMenuItem(context, page, 'addToCalendar');
 }
 
 // Stands in for chrome.tabs.captureVisibleTab, which needs the activeTab grant
@@ -271,7 +262,7 @@ async function clickMenuItem(context, page, menuItemId) {
   return serviceWorker.evaluate(async ({ id, text }) => {
     const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
     await handleContextMenuClick({ menuItemId: id, selectionText: text }, tab);
-    return { tabId: tab.id };
+    return { tabId: tab.id, selectionText: text };
   }, { id: menuItemId, text: selectionText });
 }
 

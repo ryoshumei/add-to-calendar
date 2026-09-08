@@ -13,11 +13,13 @@ const path = require('path');
 const { pathToFileURL } = require('url');
 const { chromium } = require('@playwright/test');
 
-const DEFAULT_VIEWPORT = { width: 900, height: 800 };
+// Every fixture is rendered at the same viewport: the Screenshot is the full
+// page, so a fixture taller than this is not cut off by it.
+const VIEWPORT = { width: 900, height: 800 };
 
 /**
  * Render each job's HTML fixture to <outDir>/<name>.png (full page).
- * @param {{ jobs: Array<{name: string, html: string, width?: number, height?: number}>, outDir: string }} options
+ * @param {{ jobs: Array<{name: string, html: string}>, outDir: string }} options
  * @returns {Promise<Array<{name: string, path: string}>>}
  */
 async function renderScreenshots({ jobs, outDir }) {
@@ -28,10 +30,7 @@ async function renderScreenshots({ jobs, outDir }) {
   try {
     for (const job of jobs) {
       const page = await browser.newPage({
-        viewport: {
-          width: job.width || DEFAULT_VIEWPORT.width,
-          height: job.height || DEFAULT_VIEWPORT.height,
-        },
+        viewport: VIEWPORT,
         deviceScaleFactor: 1,
       });
       try {

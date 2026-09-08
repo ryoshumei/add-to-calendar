@@ -789,19 +789,41 @@ function hideStatusModal() {
     }
 }
 
-// Show auth error modal with relogin guidance
-function showAuthErrorModal(errorMessage = 'Authentication failed') {
-    // Remove any existing modals
+// The frame every modal that reports something shares: it replaces whatever
+// the page is already showing, closes on its Close button or a click outside
+// it, and takes itself away if the user does neither. What is inside it — the
+// heading, the message, any button of its own — is the caller's.
+function openReportingModal(innerHtml, { closeAfterMs = 20000 } = {}) {
     hideStatusModal();
     const existingModal = document.querySelector('.calendar-modal-overlay');
     if (existingModal) {
         existingModal.remove();
     }
-    
+
     const modal = document.createElement('div');
     modal.className = 'calendar-modal-overlay';
-    
-    modal.innerHTML = `
+    modal.innerHTML = innerHtml;
+    document.body.appendChild(modal);
+
+    const closeButton = modal.querySelector('button.secondary');
+    if (closeButton) {
+        closeButton.addEventListener('click', () => modal.remove());
+    }
+
+    modal.addEventListener('click', (event) => {
+        if (event.target === modal) {
+            modal.remove();
+        }
+    });
+
+    setTimeout(() => modal.remove(), closeAfterMs);
+
+    return modal;
+}
+
+// Show auth error modal with relogin guidance
+function showAuthErrorModal(errorMessage = 'Authentication failed') {
+    const modal = openReportingModal(`
         <div class="status-modal error">
             <h3>⚠️ Authentication Failed</h3>
             <div class="error-message">${errorMessage}</div>
@@ -820,14 +842,10 @@ function showAuthErrorModal(errorMessage = 'Authentication failed') {
                 <button class="secondary">Close</button>
             </div>
         </div>
-    `;
-    
-    document.body.appendChild(modal);
-    
-    // Add event listeners
+    `);
+
     const signInButton = modal.querySelector('.signin-button');
-    const closeButton = modal.querySelector('.secondary');
-    
+
     signInButton.addEventListener('click', async () => {
         console.log('🔵 User clicked Sign in with Google from auth error modal');
         signInButton.disabled = true;
@@ -871,40 +889,13 @@ function showAuthErrorModal(errorMessage = 'Authentication failed') {
             signInButton.style.backgroundColor = '#d93025';
         }
     });
-    
-    closeButton.addEventListener('click', () => {
-        modal.remove();
-    });
-    
-    // Close on overlay click
-    modal.addEventListener('click', (e) => {
-        if (e.target === modal) {
-            modal.remove();
-        }
-    });
-    
-    // Auto-remove after 20 seconds
-    setTimeout(() => {
-        if (modal.parentElement) {
-            modal.remove();
-        }
-    }, 20000);
 }
 
 // Show a failed Extraction. A Screenshot has no basic fallback, so the user
 // gets the reason — a monthly limit, a backend failure — instead of an
 // invented event.
 function showExtractionErrorModal(errorMessage = 'Something went wrong') {
-    hideStatusModal();
-    const existingModal = document.querySelector('.calendar-modal-overlay');
-    if (existingModal) {
-        existingModal.remove();
-    }
-
-    const modal = document.createElement('div');
-    modal.className = 'calendar-modal-overlay';
-
-    modal.innerHTML = `
+    const modal = openReportingModal(`
         <div class="status-modal error extraction-error">
             <h3>⚠️ Could not create events</h3>
             <div class="error-message"></div>
@@ -912,46 +903,19 @@ function showExtractionErrorModal(errorMessage = 'Something went wrong') {
                 <button class="secondary">Close</button>
             </div>
         </div>
-    `;
+    `);
 
     // The message comes from the backend, so it is attached as text.
     modal.querySelector('.error-message').textContent = errorMessage;
-
-    document.body.appendChild(modal);
-
-    modal.querySelector('button.secondary').addEventListener('click', () => {
-        modal.remove();
-    });
-
-    modal.addEventListener('click', (e) => {
-        if (e.target === modal) {
-            modal.remove();
-        }
-    });
-
-    // Auto-remove after 20 seconds
-    setTimeout(() => {
-        if (modal.parentElement) {
-            modal.remove();
-        }
-    }, 20000);
 }
 
 // Show setup required modal when user has neither auth nor API key
 function showSetupRequiredModal() {
     console.log('🔧 Showing setup required modal');
-    
-    // Remove any existing modals
-    hideStatusModal();
-    const existingModal = document.querySelector('.calendar-modal-overlay');
-    if (existingModal) {
-        existingModal.remove();
-    }
-    
-    const modal = document.createElement('div');
-    modal.className = 'calendar-modal-overlay';
-    
-    modal.innerHTML = `
+
+    // Longer than the other modals: signing in or pasting a key is a job, not
+    // an acknowledgement.
+    const modal = openReportingModal(`
         <div class="status-modal error">
             <h3>🔧 Setup Required</h3>
             <div class="error-message">To use this extension, you need to either sign in with Google or provide your OpenAI API key.</div>
@@ -977,15 +941,11 @@ function showSetupRequiredModal() {
                 <button class="secondary">Close</button>
             </div>
         </div>
-    `;
-    
-    document.body.appendChild(modal);
+    `, { closeAfterMs: 30000 });
     console.log('✅ Setup required modal added to page');
-    
-    // Add event listeners
+
     const signInButton = modal.querySelector('.signin-button');
-    const closeButton = modal.querySelector('.secondary');
-    
+
     signInButton.addEventListener('click', async () => {
         console.log('🔵 User clicked Sign in with Google from modal');
         signInButton.disabled = true;
@@ -1029,25 +989,6 @@ function showSetupRequiredModal() {
             signInButton.style.backgroundColor = '#d93025';
         }
     });
-    
-    closeButton.addEventListener('click', () => {
-        modal.remove();
-    });
-    
-    // Close on overlay click
-    modal.addEventListener('click', (e) => {
-        if (e.target === modal) {
-            modal.remove();
-        }
-    });
-    
-    // Auto-remove after 30 seconds (longer to allow sign-in)
-    setTimeout(() => {
-        if (modal.parentElement) {
-            modal.remove();
-            console.log('🗑️ Setup modal auto-removed');
-        }
-    }, 30000);
 }
 
 // Display the confirmation modal for event creation (supports multiple events).

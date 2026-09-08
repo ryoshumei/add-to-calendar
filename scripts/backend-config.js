@@ -33,19 +33,16 @@ async function resolveSupabaseUrl() {
 // Endpoint to call for one of the Edge Functions in config.js: the configured
 // URL, or the same path on the override's origin.
 async function resolveBackendUrl(productionUrl) {
-    return resolveAgainstOverride(productionUrl);
-}
-
-// Endpoint the own-key path posts to: OpenAI, or the same path on the
-// override's origin so a test can answer it from a local stub.
-async function resolveOpenAiUrl() {
-    return resolveAgainstOverride(OPENAI_CHAT_COMPLETIONS_URL);
-}
-
-async function resolveAgainstOverride(productionUrl) {
     const override = await getBackendBaseUrlOverride();
     if (!override) return productionUrl;
     return new URL(new URL(productionUrl).pathname, override).toString();
+}
+
+// Endpoint the own-key path posts to: OpenAI, or — by the same rule, since
+// the override swaps origins and keeps paths — the completions path on the
+// override's origin, so a test can answer it from a local stub.
+async function resolveOpenAiUrl() {
+    return resolveBackendUrl(OPENAI_CHAT_COMPLETIONS_URL);
 }
 
 // Export for use in other scripts
