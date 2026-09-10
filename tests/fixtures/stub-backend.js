@@ -137,7 +137,7 @@ async function startStubBackend() {
   const server = http.createServer((req, res) => {
     const url = new URL(req.url, 'http://127.0.0.1');
 
-    readBody(req).then((rawBody) => {
+    const answer = (rawBody) => {
       requests.push({
         method: req.method,
         pathname: url.pathname,
@@ -220,6 +220,19 @@ async function startStubBackend() {
       }
 
       json(404, { error: `No stub route for ${req.method} ${url.pathname}` });
+    };
+
+    // A body that never arrives — an aborted request, a socket dropped at
+    // teardown — is nothing to fail a test over, but an unhandled rejection
+    // here is fatal to the Node process running the whole worker.
+    readBody(req).then(answer, (error) => {
+      console.warn(
+        `Stub backend could not read ${req.method} ${url.pathname}: ${error.message}`
+      );
+      if (!res.headersSent) {
+        res.writeHead(400, CORS_HEADERS);
+        res.end();
+      }
     });
   });
 

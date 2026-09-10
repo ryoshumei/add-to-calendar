@@ -99,7 +99,8 @@ export const SCREENSHOT_EVAL_CASES: ScreenshotEvalCase[] = [
     },
   },
   {
-    // Story 11: a timetable Screenshot produces one Event per session.
+    // Story 11: a timetable Screenshot produces one Event per session — which
+    // is a claim about all three, so all three are named.
     name: "timetable-en",
     fixture: "timetable-en.html",
     lang: "en",
@@ -109,6 +110,20 @@ export const SCREENSHOT_EVAL_CASES: ScreenshotEvalCase[] = [
       maxEvents: 3,
       startTime: "2026-07-24T09:30:00",
       titleIncludes: ["keynote", "opening", "ship smaller"],
+      events: [
+        {
+          titleIncludes: ["keynote", "opening", "ship smaller"],
+          startTime: "2026-07-24T09:30:00",
+        },
+        {
+          titleIncludes: ["postgres", "scaling"],
+          startTime: "2026-07-24T11:00:00",
+        },
+        {
+          titleIncludes: ["workshop", "seams", "testing"],
+          startTime: "2026-07-24T13:30:00",
+        },
+      ],
     },
   },
   {
@@ -121,6 +136,17 @@ export const SCREENSHOT_EVAL_CASES: ScreenshotEvalCase[] = [
       maxEvents: 3,
       startTime: "2026-09-03T10:00:00",
       titleIncludes: ["研修", "オリエン"],
+      events: [
+        {
+          titleIncludes: ["オリエン", "新人研修"],
+          startTime: "2026-09-03T10:00:00",
+        },
+        {
+          titleIncludes: ["セキュリティ", "情報"],
+          startTime: "2026-09-03T13:00:00",
+        },
+        { titleIncludes: ["1on1", "面談"], startTime: "2026-09-03T15:00:00" },
+      ],
     },
   },
 ];

@@ -10,21 +10,39 @@ cd "$PROJECT_ROOT"
 
 # Get version from manifest.json
 VERSION=$(grep -o '"version": *"[^"]*"' manifest.json | grep -o '"[0-9.]*"' | tr -d '"')
-OUTPUT_FILE="calendar-event-creator-v${VERSION}.zip"
+
+# The archive this builds. CI names it after the tag it is releasing; a person
+# running this gets the manifest version.
+OUTPUT_FILE="${PACKAGE_OUTPUT:-calendar-event-creator-v${VERSION}.zip}"
+
+# The deploy question is for a human at a terminal. An unattended run — CI
+# packaging a tag — answers it with --yes, so that the release archive is
+# built by this script rather than by a second, drifting file list.
+ASSUME_YES="${PACKAGE_ASSUME_YES:-0}"
+for argument in "$@"; do
+    case "$argument" in
+        -y|--yes) ASSUME_YES=1 ;;
+    esac
+done
 
 echo "📦 Packaging Calendar Event Creator v${VERSION} for Chrome Web Store"
 echo "──────────────────────────────────────────────────────────────"
 echo ""
-echo "⚠️  IMPORTANT: Before packaging, ensure Supabase function is deployed!"
-echo "   Command: npm run deploy:backend"
-echo ""
-read -p "Have you deployed the Supabase function? (y/n): " confirmed
-if [[ "$confirmed" != "y" && "$confirmed" != "Y" ]]; then
+
+if [[ "$ASSUME_YES" == "1" ]]; then
+    echo "▶️  Deploy check skipped (--yes): deploying the backend is the caller's."
+else
+    echo "⚠️  IMPORTANT: Before packaging, ensure Supabase function is deployed!"
+    echo "   Command: npm run deploy:backend"
     echo ""
-    echo "❌ Packaging cancelled. Please deploy first:"
-    echo "   npm run deploy:backend"
-    echo ""
-    exit 1
+    read -p "Have you deployed the Supabase function? (y/n): " confirmed
+    if [[ "$confirmed" != "y" && "$confirmed" != "Y" ]]; then
+        echo ""
+        echo "❌ Packaging cancelled. Please deploy first:"
+        echo "   npm run deploy:backend"
+        echo ""
+        exit 1
+    fi
 fi
 echo ""
 
