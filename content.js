@@ -664,7 +664,16 @@ function showRegionOverlay() {
     // the user: a synthetic Enter or double-click would send the visible tab
     // and spend one of their monthly requests on a Screenshot they never
     // asked for, so every handler here takes real input only.
+    //
+    // And only an overlay that is still on the page draws anything. A page is
+    // free to tear its own DOM down, overlay and all; these listeners are on
+    // the window and would outlive it, so the next real event is where that is
+    // noticed — before a stray Enter sends the whole visible tab.
     const fromTheUser = (handler) => (event) => {
+        if (!overlay.isConnected) {
+            hideRegionOverlay();
+            return;
+        }
         if (event.isTrusted) handler(event);
     };
 
@@ -674,12 +683,17 @@ function showRegionOverlay() {
     const mouseUp = fromTheUser(onMouseUp);
     const keyDown = fromTheUser(onKeyDown);
 
-    overlay.addEventListener('mousedown', mouseDown);
-    overlay.addEventListener('dblclick', doubleClick);
+    // All five on the window in the capture phase: bound on the overlay in the
+    // bubble phase, the two that start and shortcut a Region are exactly the
+    // ones a page could swallow before they ever arrived.
+    window.addEventListener('mousedown', mouseDown, true);
+    window.addEventListener('dblclick', doubleClick, true);
     window.addEventListener('mousemove', mouseMove, true);
     window.addEventListener('mouseup', mouseUp, true);
     window.addEventListener('keydown', keyDown, true);
     state.removeListeners = () => {
+        window.removeEventListener('mousedown', mouseDown, true);
+        window.removeEventListener('dblclick', doubleClick, true);
         window.removeEventListener('mousemove', mouseMove, true);
         window.removeEventListener('mouseup', mouseUp, true);
         window.removeEventListener('keydown', keyDown, true);
@@ -726,29 +740,69 @@ function toRegion(from, to) {
     };
 }
 
+// How long the capture waits for the frame that no longer has the overlay in
+// it before going ahead anyway. requestAnimationFrame does not run at all
+// while the tab is hidden — a minimised or occluded window — and a Screenshot
+// that never happens is worse than one taken a frame early.
+const PAINT_WAIT_MS = 100;
+
 // Hand the Region to the service worker, which captures the tab and runs the
 // Extraction on it. Anything the extension drew — this overlay, a modal left
-// over from an earlier Extraction — comes off the page first, and the capture
+// over from an earlier Extraction — goes out of sight first, and the capture
 // waits for the frame that paints its absence, so none of it is in the
 // Screenshot.
 async function sendRegion(region) {
-    const devicePixelRatio = window.devicePixelRatio;
+    // What the page measures itself in, so the Region can be placed on a
+    // capture taken at whatever size Chrome takes it at.
+    const metrics = {
+        viewportWidth: window.innerWidth,
+        viewportHeight: window.innerHeight,
+        devicePixelRatio: window.devicePixelRatio
+    };
 
     hideRegionOverlay();
-    document.querySelectorAll('.calendar-modal-overlay').forEach(modal => modal.remove());
+    const showModalsAgain = hideModalsForCapture();
     await afterNextPaint();
 
     try {
-        await chrome.runtime.sendMessage({ action: 'regionDrawn', region, devicePixelRatio });
+        const result = await chrome.runtime.sendMessage({
+            action: 'regionDrawn',
+            region,
+            metrics
+        });
+
+        // A Screenshot that did not happen — a busy tab, a page Chrome will
+        // not capture — leaves the user with whatever they were already
+        // looking at, rather than taking it away for nothing. A successful one
+        // replaces it with the Events that were just read.
+        if (!result || result.success !== true) {
+            showModalsAgain();
+        }
     } catch (error) {
         console.error('Could not send the Region for Extraction:', error);
+        showModalsAgain();
     }
 }
 
+// Take everything the extension has on the page out of the picture, without
+// throwing it away: a confirmation the user has not acted on holds the Events
+// of an Extraction they have already been charged for. Hands back the way to
+// put it in front of them again.
+function hideModalsForCapture() {
+    const modals = [...document.querySelectorAll('.calendar-modal-overlay')];
+    modals.forEach(modal => { modal.style.display = 'none'; });
+
+    return () => modals.forEach(modal => { modal.style.display = ''; });
+}
+
 // requestAnimationFrame runs just before the next paint, so it takes a second
-// one to be back after the frame that no longer has the overlay in it.
+// one to be back after the frame that no longer has the overlay in it — and a
+// timeout beside it, because a hidden tab paints no frames at all.
 function afterNextPaint() {
-    return new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    return Promise.race([
+        new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+        new Promise(resolve => setTimeout(resolve, PAINT_WAIT_MS))
+    ]);
 }
 
 // Display a status/loading modal

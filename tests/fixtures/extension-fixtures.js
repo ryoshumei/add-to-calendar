@@ -283,6 +283,23 @@ async function menuItemExists(context, menuItemId) {
   }, menuItemId);
 }
 
+// Records the Chrome notifications the worker raises: the surface it reports
+// on when no page modal and no popup is available. Returns a reader for what
+// has been raised so far.
+async function recordNotifications(context) {
+  const [serviceWorker] = context.serviceWorkers();
+
+  await serviceWorker.evaluate(() => {
+    self.notificationsRaised = [];
+    chrome.notifications.create = (options) => {
+      self.notificationsRaised.push(options);
+      return Promise.resolve('stub-notification');
+    };
+  });
+
+  return () => serviceWorker.evaluate(() => self.notificationsRaised ?? []);
+}
+
 // The tab id Chrome knows a page by, which is what the service worker's
 // handlers are given. Asked the way those handlers ask — the active tab of the
 // last focused window — because the extension holds no `tabs` permission to
@@ -312,6 +329,7 @@ module.exports = {
   openPopup,
   clickMenuItem,
   menuItemExists,
+  recordNotifications,
   tabIdFor,
   standInForCapture,
   capturesTaken,

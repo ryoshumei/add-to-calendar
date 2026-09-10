@@ -180,8 +180,18 @@ async function handleCaptureScreenshot() {
             return;
         }
 
-        if (response && !response.success && response.showInPopup) {
+        // The page has already said why nothing happened — the setup-required
+        // modal is on it — and the popup is in front of that. Saying it twice
+        // is not the job; getting out of the way so they can read it is.
+        if (response && response.reportedOnPage) {
+            window.close();
+            return;
+        }
+
+        if (response && response.error) {
             showMessage(response.error, 'error');
+        } else if (!response) {
+            showMessage('The screenshot could not be started.', 'error');
         }
     } catch (error) {
         console.error('Screenshot capture failed:', error);
@@ -325,10 +335,12 @@ async function loadScreenshotMenuSetting(toggle) {
             [SCREENSHOT_MENU_ITEM_SETTING]: true
         });
         toggle.checked = stored[SCREENSHOT_MENU_ITEM_SETTING] !== false;
+        // Enabled only once it is showing what is actually stored. A read that
+        // failed leaves the static HTML's "checked" on screen, and letting the
+        // user act on that would describe a menu they do not have.
+        toggle.disabled = false;
     } catch (error) {
         console.error('Could not read the right-click menu setting:', error);
-    } finally {
-        toggle.disabled = false;
     }
 }
 

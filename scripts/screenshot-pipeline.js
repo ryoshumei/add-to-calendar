@@ -26,11 +26,12 @@
          * @param {string} captureDataUrl - Data URL of the captured visible tab
          * @param {?{x: number, y: number, width: number, height: number}} region -
          *   The Region in CSS pixels, or null for the whole visible tab
-         * @param {number} devicePixelRatio - Device pixels per CSS pixel
+         * @param {{viewportWidth?: number, viewportHeight?: number, devicePixelRatio?: number}} metrics -
+         *   What the page measured itself in when the Region was drawn
          * @param {{maxEdgePx?: number, quality?: number, maxEncodedBytes?: number}} [options]
          * @returns {Promise<string>} JPEG data URL
          */
-        async buildScreenshotDataUrl(captureDataUrl, region, devicePixelRatio, options = {}) {
+        async buildScreenshotDataUrl(captureDataUrl, region, metrics, options = {}) {
             const maxEdgePx = options.maxEdgePx ?? this.MAX_EDGE_PX;
             const quality = options.quality ?? this.JPEG_QUALITY;
             const maxEncodedBytes = options.maxEncodedBytes ?? this.MAX_ENCODED_BYTES;
@@ -38,7 +39,7 @@
             const capture = await createImageBitmap(await (await fetch(captureDataUrl)).blob());
 
             try {
-                const deviceRegion = toCaptureRect(region, devicePixelRatio, capture);
+                const deviceRegion = toCaptureRect(region, metrics, capture);
                 const scale = Math.min(
                     1,
                     maxEdgePx / Math.max(deviceRegion.width, deviceRegion.height)
@@ -76,18 +77,36 @@
     // A Region dragged past the edge of the window is kept inside the capture:
     // beyond the edge there is nothing to crop, and drawing it anyway would put
     // a black band in the Screenshot.
-    function toCaptureRect(region, devicePixelRatio, capture) {
+    function toCaptureRect(region, metrics, capture) {
         if (!region) {
             return { x: 0, y: 0, width: capture.width, height: capture.height };
         }
 
-        const ratio = devicePixelRatio > 0 ? devicePixelRatio : 1;
+        const ratio = captureScale(metrics, capture);
         const left = clamp(Math.round(region.x * ratio), 0, capture.width - 1);
         const top = clamp(Math.round(region.y * ratio), 0, capture.height - 1);
         const right = clamp(Math.round((region.x + region.width) * ratio), left + 1, capture.width);
         const bottom = clamp(Math.round((region.y + region.height) * ratio), top + 1, capture.height);
 
         return { x: left, y: top, width: right - left, height: bottom - top };
+    }
+
+    // How many pixels of the capture one CSS pixel of the Region is worth.
+    // Measured against the capture itself — the width the page reported
+    // against the width that came back — because the page's own
+    // devicePixelRatio is only a claim about that: a zoomed tab, a window
+    // dragged between displays, a browser that captures at a fixed size all
+    // make it wrong, and the clamps would turn that into a silently wrong crop
+    // rather than into a complaint. The ratio is the fallback for a page that
+    // reported no viewport.
+    function captureScale(metrics, capture) {
+        const viewportWidth = metrics?.viewportWidth;
+        if (viewportWidth > 0 && capture.width > 0) {
+            return capture.width / viewportWidth;
+        }
+
+        const ratio = metrics?.devicePixelRatio;
+        return ratio > 0 ? ratio : 1;
     }
 
     function clamp(value, lowest, highest) {

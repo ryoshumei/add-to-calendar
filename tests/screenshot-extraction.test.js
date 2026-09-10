@@ -235,9 +235,11 @@ test.describe('Screenshot Extraction (stub backend)', () => {
 
     // The first trigger closed the popup behind it, so a second one is a
     // second visit to the toolbar.
-    await triggerCapture(context, extensionId, sourcePage);
+    const popupPage = await triggerCapture(context, extensionId, sourcePage);
 
-    // Not even an overlay to draw a second Region on.
+    // Not even an overlay to draw a second Region on — and the popup the user
+    // pressed says why, rather than looking like a dead button.
+    await expect(popupPage.locator('#message')).toContainText('already being processed');
     await expect(sourcePage.locator(OVERLAY)).toHaveCount(0);
     const card = sourcePage.locator('.calendar-modal-overlay .event-card');
     await expect(card).toHaveCount(1);
@@ -258,6 +260,89 @@ test.describe('Screenshot Extraction (stub backend)', () => {
     const authModal = sourcePage.locator('.calendar-modal-overlay .status-modal.error');
     await expect(authModal).toContainText('Session expired. Please sign in again with Google.');
     await expect(authModal.locator('.signin-button')).toBeVisible();
+    await expect(sourcePage.locator('.calendar-modal-overlay .event-card')).toHaveCount(0);
+  });
+
+  test('a session with no access token asks the user to sign in again', async ({
+    context,
+    extensionId,
+    stubBackend,
+    sourcePage,
+    signedIn,
+  }) => {
+    // A session whose token has gone — refreshed away, cleared, never restored
+    // — is a sign-in problem, and the modal that offers a sign-in is the one
+    // that fixes it. Reported as a plain Extraction failure it reads as the
+    // backend being broken.
+    const [serviceWorker] = context.serviceWorkers();
+    await serviceWorker.evaluate(() => {
+      supabaseAuth.getAccessToken = () => null;
+    });
+    await standInForCapture(context, sourcePage);
+    await captureFromPopup(context, extensionId, sourcePage);
+
+    const authModal = sourcePage.locator('.calendar-modal-overlay .status-modal.error');
+    await expect(authModal).toContainText('sign in');
+    await expect(authModal.locator('.signin-button')).toBeVisible();
+    expect(stubBackend.requestsTo(PROCESS_IMAGE_PATH, 'POST')).toHaveLength(0);
+  });
+
+  test('Events that were extracted are not lost when the page cannot show them', async ({
+    context,
+    extensionId,
+    stubBackend,
+    sourcePage,
+    signedIn,
+  }) => {
+    // The Extraction happened and the user has been charged for it. If the
+    // page cannot take the modal — it navigated, it is closing — that is a
+    // delivery problem, not a failed Extraction: the Event opens in Google
+    // Calendar instead of being thrown away with an error.
+    const [serviceWorker] = context.serviceWorkers();
+    await serviceWorker.evaluate(() => {
+      self.tabsOpened = [];
+      chrome.tabs.create = (options) => {
+        self.tabsOpened.push(options.url);
+        return Promise.resolve({ id: -1 });
+      };
+
+      const deliver = self.sendToContentScript;
+      self.sendToContentScript = async (tabId, message) => {
+        if (message.type === 'SHOW_CONFIRMATION') {
+          throw new Error('Could not establish connection. Receiving end does not exist.');
+        }
+        return deliver(tabId, message);
+      };
+    });
+    await standInForCapture(context, sourcePage);
+    await captureFromPopup(context, extensionId, sourcePage);
+
+    const opened = await expect
+      .poll(() => serviceWorker.evaluate(() => self.tabsOpened ?? []))
+      .toHaveLength(1)
+      .then(() => serviceWorker.evaluate(() => self.tabsOpened));
+
+    expect(opened[0]).toContain('calendar.google.com');
+    expect(opened[0]).toContain('Stubbed+Design+Review');
+    // The Extraction is not reported as having failed.
+    await expect(sourcePage.locator('.calendar-modal-overlay .extraction-error')).toHaveCount(0);
+  });
+
+  test('a 200 that is not the shape the backend promises is a clean error', async ({
+    context,
+    extensionId,
+    stubBackend,
+    sourcePage,
+    signedIn,
+  }) => {
+    stubBackend.imageResponse = {
+      status: 200,
+      body: { eventDetails: { events: [{ title: 'Stubbed Half An Event' }] } },
+    };
+    await standInForCapture(context, sourcePage);
+    await captureFromPopup(context, extensionId, sourcePage);
+
+    await expect(sourcePage.locator('.calendar-modal-overlay .extraction-error')).toBeVisible();
     await expect(sourcePage.locator('.calendar-modal-overlay .event-card')).toHaveCount(0);
   });
 
@@ -356,13 +441,16 @@ test.describe('Screenshot Extraction (stub backend)', () => {
   }) => {
     await standInForCapture(context, sourcePage);
 
-    await triggerCapture(context, extensionId, sourcePage);
+    const popupPage = await triggerCapture(context, extensionId, sourcePage);
 
     // Before the drawing, not after: with nothing to send a Region to, the
     // overlay never opens.
     await expect(sourcePage.locator('.calendar-modal-overlay .status-modal.error h3')).toContainText(
       'Setup Required'
     );
+    // The guidance is on the page, and the popup is in front of it: it closes
+    // the way it does when the overlay opens, so the user can read it.
+    await expect.poll(() => popupPage.isClosed()).toBe(true);
     await expect(sourcePage.locator(OVERLAY)).toHaveCount(0);
     expect(stubBackend.requestsTo(PROCESS_IMAGE_PATH, 'POST')).toHaveLength(0);
   });

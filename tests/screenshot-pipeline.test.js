@@ -19,10 +19,11 @@ async function loadPipeline(page) {
     pattern = 'gradient',
     region = null,
     devicePixelRatio = 1,
+    viewport = null,
     options = undefined,
   }) =>
     page.evaluate(
-      async ({ capture, pattern, region, devicePixelRatio, options }) => {
+      async ({ capture, pattern, region, metrics, options }) => {
         const source = document.createElement('canvas');
         source.width = capture.width;
         source.height = capture.height;
@@ -55,7 +56,7 @@ async function loadPipeline(page) {
           dataUrl = await SCREENSHOT_PIPELINE.buildScreenshotDataUrl(
             captureDataUrl,
             region,
-            devicePixelRatio,
+            metrics,
             options
           );
         } catch (error) {
@@ -93,7 +94,19 @@ async function loadPipeline(page) {
           sentLength: dataUrl.length,
         };
       },
-      { capture, pattern, region, devicePixelRatio, options }
+      {
+        capture,
+        pattern,
+        region,
+        // What the page reports about itself when the Region is drawn: its
+        // viewport in CSS pixels, and the ratio it believes it is drawn at.
+        metrics: {
+          devicePixelRatio,
+          viewportWidth: viewport ? viewport.width : undefined,
+          viewportHeight: viewport ? viewport.height : undefined,
+        },
+        options,
+      }
     );
 }
 
@@ -211,6 +224,30 @@ test.describe('Screenshot pipeline', () => {
     expect(result.width).toBe(200);
     expect(result.height).toBe(120);
     expectColour(result.centrePixel, TOP_LEFT);
+  });
+
+  test('crops by what the capture measures, not by what the page claims', async ({
+    sourcePage,
+  }) => {
+    const run = await loadPipeline(sourcePage);
+
+    // The page says it is drawn 1:1 and the capture says otherwise: a zoomed
+    // tab, a window dragged onto a second display, a browser that captures at
+    // its own size. Believing the page would crop the top-left quadrant and
+    // hand back a Screenshot of the wrong part of the screen — quietly, since
+    // the clamps make any rectangle fit.
+    const result = await run({
+      capture: { width: 2000, height: 1000 },
+      pattern: 'quadrants',
+      region: { x: 600, y: 300, width: 300, height: 150 },
+      devicePixelRatio: 1,
+      viewport: { width: 1000, height: 500 },
+    });
+
+    expect(result.error).toBeUndefined();
+    expect(result.width).toBe(600);
+    expect(result.height).toBe(300);
+    expectColour(result.centrePixel, BOTTOM_RIGHT);
   });
 
   test('rejects a Screenshot whose encoded size is over the cap', async ({ sourcePage }) => {

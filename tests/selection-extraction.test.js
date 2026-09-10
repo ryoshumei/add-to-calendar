@@ -7,28 +7,12 @@ import {
   openPopup,
   selectText,
   extractFromSelection,
+  recordNotifications,
 } from './fixtures/extension-fixtures.js';
 import { STUB_USER } from './fixtures/stub-backend.js';
 
 const PROCESS_TEXT_PATH = '/functions/v1/process-text';
 const OPENAI_PATH = '/v1/chat/completions';
-
-// Records the Chrome notifications the worker raises: the surface the
-// Selection flow reports an error on when it is not a page modal. Returns a
-// reader for what has been raised so far.
-async function recordNotifications(context) {
-  const [serviceWorker] = context.serviceWorkers();
-
-  await serviceWorker.evaluate(() => {
-    self.notificationsRaised = [];
-    chrome.notifications.create = (options) => {
-      self.notificationsRaised.push(options);
-      return Promise.resolve('stub-notification');
-    };
-  });
-
-  return () => serviceWorker.evaluate(() => self.notificationsRaised ?? []);
-}
 
 test.describe('Selection Extraction (stub backend)', () => {
   test('a seeded session signs the extension in', async ({

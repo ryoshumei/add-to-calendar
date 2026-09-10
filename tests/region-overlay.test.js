@@ -14,11 +14,25 @@ import {
   triggerCapture,
   drawRegion,
   captureFromPopup,
+  tabIdFor,
 } from './fixtures/extension-fixtures.js';
 
 const PROCESS_IMAGE_PATH = '/functions/v1/process-image';
 const OVERLAY = '#calendar-region-overlay';
 const REGION_RECT = `${OVERLAY} .region-rect`;
+
+// What Chrome counts as a double-click: two clicks up to about this far apart.
+// The overlay's own mis-click wait is written against it, and is not readable
+// from here — the content script's constants live in the isolated world — so
+// this is the contract both ends of that wait are asserted against.
+const DOUBLE_CLICK_WINDOW_MS = 500;
+
+// Puts the tab in the state a Selection Extraction already running on it would:
+// the per-tab guard the two Sources share refuses a second one.
+async function busyTab(context, tabId) {
+  const [serviceWorker] = context.serviceWorkers();
+  await serviceWorker.evaluate((id) => activeRequests.add(id), tabId);
+}
 
 // A stand-in capture small enough that the 1600 px cap never bites, so a
 // Screenshot of these dimensions is the whole visible tab and nothing less.
@@ -208,11 +222,19 @@ test.describe('Region overlay', () => {
 
     // The first half of a double-click: a press and release that went nowhere.
     await sourcePage.mouse.up();
-    // Chrome counts a second click up to about 500 ms later as a double-click,
-    // so the overlay has to outlive that gap for the whole tab to be sendable.
-    await sourcePage.waitForTimeout(400);
 
+    // Chrome counts a second click up to about DOUBLE_CLICK_WINDOW_MS later as
+    // a double-click, so the overlay has to still be there well into that gap.
+    await sourcePage.waitForTimeout(DOUBLE_CLICK_WINDOW_MS * 0.6);
     await expect(sourcePage.locator(OVERLAY)).toBeVisible();
+
+    // And it is a wait, not a stay: a mis-click that leaves the overlay up for
+    // ever is a mis-click that never dismissed it.
+    await expect
+      .poll(() => sourcePage.locator(OVERLAY).count(), {
+        timeout: DOUBLE_CLICK_WINDOW_MS * 4,
+      })
+      .toBe(0);
   });
 
   test('Enter sends the whole visible tab', async ({
@@ -303,11 +325,70 @@ test.describe('Region overlay', () => {
     await drawRegion(sourcePage, { x: 100, y: 120, width: 260, height: 160 });
     await capture.reached();
 
+    // Out of the picture, both of them: the overlay is gone and the modal is
+    // not being painted, which is all the camera cares about.
     expect(await sourcePage.locator(OVERLAY).count()).toBe(0);
-    expect(await sourcePage.locator('.calendar-modal-overlay').count()).toBe(0);
+    await expect(sourcePage.locator('.calendar-modal-overlay')).toBeHidden();
 
+    // What was hidden for the capture is replaced by the Events just read.
     await capture.release();
+    await expect(sourcePage.locator('.calendar-modal-overlay .event-card')).toBeVisible();
     await expect(sourcePage.locator('.calendar-modal-overlay .event-card')).toHaveCount(1);
+  });
+
+  test('a Region the worker refuses leaves the earlier Events on the page', async ({
+    context,
+    extensionId,
+    stubBackend,
+    sourcePage,
+    signedIn,
+  }) => {
+    await standInForCapture(context, sourcePage);
+
+    // Events from an Extraction the user has already been charged for, which
+    // they have not acted on yet.
+    await captureFromPopup(context, extensionId, sourcePage);
+    await expect(sourcePage.locator('.calendar-modal-overlay .event-card')).toHaveCount(1);
+
+    // They start a second Screenshot, and something else claims the tab before
+    // they finish drawing — a Selection Extraction from the right-click menu.
+    const sourceTabId = await tabIdFor(context, sourcePage);
+    await triggerCapture(context, extensionId, sourcePage);
+    await expect(sourcePage.locator(OVERLAY)).toBeVisible();
+    await busyTab(context, sourceTabId);
+
+    await drawRegion(sourcePage, { x: 100, y: 120, width: 260, height: 160 });
+
+    // Nothing was captured, so nothing replaced what they were looking at.
+    await expect(sourcePage.locator('.calendar-modal-overlay')).toBeVisible();
+    await expect(sourcePage.locator('.calendar-modal-overlay .event-card')).toHaveCount(1);
+    expect(await capturesTaken(context)).toBe(1);
+    expect(stubBackend.requestsTo(PROCESS_IMAGE_PATH, 'POST')).toHaveLength(1);
+  });
+
+  test('an overlay the page removed itself stops driving anything', async ({
+    context,
+    extensionId,
+    stubBackend,
+    sourcePage,
+    signedIn,
+  }) => {
+    await standInForCapture(context, sourcePage);
+    await triggerCapture(context, extensionId, sourcePage);
+    await expect(sourcePage.locator(OVERLAY)).toBeVisible();
+
+    // A page is free to tear its own DOM down. The listeners that drive the
+    // overlay are on the window, so they outlive the layer they belong to —
+    // and a stray Enter afterwards would send the whole visible tab and spend
+    // one of the user's monthly requests.
+    await sourcePage.evaluate(() => {
+      document.querySelector('#calendar-region-overlay').remove();
+    });
+
+    await sourcePage.keyboard.press('Enter');
+    await sourcePage.mouse.dblclick(240, 180);
+
+    await expectDismissedWithNothingCaptured({ context, extensionId, stubBackend, sourcePage });
   });
 
   test('a page the overlay cannot open on is reported in the popup', async ({

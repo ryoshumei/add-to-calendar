@@ -98,9 +98,11 @@ async function applyContextMenus() {
     const { [SCREENSHOT_MENU_ITEM_SETTING]: showScreenshotItem } =
         await chrome.storage.sync.get({ [SCREENSHOT_MENU_ITEM_SETTING]: true });
 
-    await chrome.contextMenus.removeAll();
-
-    chrome.contextMenus.create({
+    // Item by item, never wiping the menu first: clearing it and building it
+    // again leaves a window in which the user right-clicks and the extension
+    // is simply not there, and the Selection item is not theirs to lose over a
+    // setting about the Screenshot one.
+    await ensureMenuItem({
         id: "addToCalendar",
         title: "Add to Google Calendar",
         contexts: ["selection"]
@@ -109,11 +111,48 @@ async function applyContextMenus() {
     if (showScreenshotItem) {
         // Every context, not just "page": a Screenshot is of the visible tab,
         // so what the pointer happens to be over makes no difference to it.
-        chrome.contextMenus.create({
+        await ensureMenuItem({
             id: "addScreenshotToCalendar",
             title: "Add screenshot to Google Calendar",
             contexts: ["all"]
         });
+    } else {
+        await removeMenuItem("addScreenshotToCalendar");
+    }
+}
+
+// Put an item on the menu as described, whether or not Chrome already has it.
+// There is no way to ask what is on the menu, but an update of an item Chrome
+// does not have fails — so the update is the question, and the create is the
+// answer when it comes back no.
+async function ensureMenuItem({ id, ...properties }) {
+    try {
+        await chrome.contextMenus.update(id, properties);
+    } catch (error) {
+        await createMenuItem({ id, ...properties });
+    }
+}
+
+// contextMenus.create hands back an id rather than a promise and reports
+// trouble through runtime.lastError, which would otherwise go unread.
+function createMenuItem(item) {
+    return new Promise((resolve, reject) => {
+        chrome.contextMenus.create(item, () => {
+            const failure = chrome.runtime.lastError;
+            if (failure) {
+                reject(new Error(failure.message));
+            } else {
+                resolve();
+            }
+        });
+    });
+}
+
+async function removeMenuItem(id) {
+    try {
+        await chrome.contextMenus.remove(id);
+    } catch (error) {
+        // It was not on the menu, which is where this was heading anyway.
     }
 }
 
@@ -260,7 +299,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             .then(() => handleScreenshotCapture(
                 sender.tab,
                 request.region,
-                request.devicePixelRatio
+                request.metrics
             ))
             .then(result => sendResponse(result))
             .catch(error => {
@@ -297,20 +336,24 @@ async function handleContextMenuClick(info, tab) {
     if (info.menuItemId === "addScreenshotToCalendar") {
         // A Screenshot is one Source on its own: whatever the user had
         // highlighted when they right-clicked plays no part in it.
-        await ensureAuthInitialized();
-        const result = await startRegionCapture(tab);
+        //
+        // Nothing that happens in here is allowed to reject: the listener
+        // that called it drops the promise, so a rejection would be an
+        // unhandled one and the user would be told nothing at all.
+        try {
+            await ensureAuthInitialized();
+            const result = await startRegionCapture(tab);
 
-        // No popup is open on this trigger, and the page that could not run
-        // the overlay cannot show a modal either, so this is the one surface
-        // left for saying why nothing happened — unless the page has already
-        // said it, which is what reportedOnPage means.
-        if (result && !result.success && result.error && !result.reportedOnPage) {
-            chrome.notifications.create({
-                type: 'basic',
-                iconUrl: 'icons/icon128.png',
-                title: 'Calendar Event Creator',
-                message: result.error
-            });
+            // No popup is open on this trigger, and the page that could not
+            // run the overlay cannot show a modal either, so this is the one
+            // surface left for saying why nothing happened — unless the page
+            // has already said it, which is what reportedOnPage means.
+            if (result && !result.success && result.error && !result.reportedOnPage) {
+                notify(result.error);
+            }
+        } catch (error) {
+            console.error('Could not start a Screenshot:', error);
+            notify('Error: ' + error.message);
         }
         return;
     }
@@ -333,6 +376,11 @@ async function handleContextMenuClick(info, tab) {
         try {
             // Mark this tab as having an active request
             activeRequests.add(tab.id);
+
+            // The same wait the Screenshot branch does: on a cold worker the
+            // session is still being restored, and reading currentUser before
+            // it lands sends a signed-in user down the no-key path.
+            await ensureAuthInitialized();
 
             const selectedText = info.selectionText;
             let eventDetails;
@@ -456,18 +504,23 @@ async function handleContextMenuClick(info, tab) {
             if (!usedOwnKey && isAuthError(error)) {
                 await showAuthError(tab.id, error.message);
             } else {
-                chrome.notifications.create({
-                    type: 'basic',
-                    iconUrl: 'icons/icon128.png',
-                    title: 'Calendar Event Creator',
-                    message: 'Error: ' + error.message
-                });
+                notify('Error: ' + error.message);
             }
         } finally {
             // Clean up the active request
             activeRequests.delete(tab.id);
         }
     }
+}
+
+// The last surface left when the page cannot be told and no popup is open.
+function notify(message) {
+    chrome.notifications.create({
+        type: 'basic',
+        iconUrl: 'icons/icon128.png',
+        title: 'Calendar Event Creator',
+        message
+    });
 }
 
 // Chrome refuses to capture browser-internal pages (chrome://, the Web Store)
@@ -487,7 +540,14 @@ function screenshotRefusal(tab) {
 
     if (activeRequests.has(tab.id)) {
         console.log('Request already in progress for this tab');
-        return { success: false, ignored: true };
+        // Ignored, but not silently: the user pressed something, and a
+        // trigger that leaves no trace reads as a dead button.
+        return {
+            success: false,
+            ignored: true,
+            error: 'A Screenshot is already being processed on this tab.',
+            showInPopup: true
+        };
     }
 
     return null;
@@ -558,9 +618,10 @@ async function startRegionCapture(tab) {
 }
 
 // Turn the Region of the visible tab into a Screenshot and run one Extraction
-// on it. The Region is in CSS pixels, or null for the whole visible tab; the
-// device pixel ratio is what the capture is measured in.
-async function handleScreenshotCapture(tab, region = null, devicePixelRatio = 1) {
+// on it. The Region is in CSS pixels, or null for the whole visible tab;
+// `metrics` is what the page measured itself in — its viewport size and its
+// device pixel ratio — which is how the Region is placed on the capture.
+async function handleScreenshotCapture(tab, region = null, metrics = {}) {
     const refusal = screenshotRefusal(tab);
     if (refusal) return refusal;
 
@@ -597,29 +658,22 @@ async function handleScreenshotCapture(tab, region = null, devicePixelRatio = 1)
             apiKey ? 'Using your OpenAI API key' : 'This may take a few seconds'
         );
 
+        let screenshot;
+        let eventDetails;
+
         try {
-            const screenshot = await SCREENSHOT_PIPELINE.buildScreenshotDataUrl(
+            screenshot = await SCREENSHOT_PIPELINE.buildScreenshotDataUrl(
                 capture,
                 region,
-                devicePixelRatio
+                metrics
             );
 
-            const eventDetails = apiKey
+            eventDetails = apiKey
                 ? await processScreenshotWithOpenAI(screenshot, apiKey)
                 // Optional chaining because signing out between the trigger
                 // and the drag leaves no client: that reads as the sign-in
                 // error it is, rather than a TypeError.
                 : await processImageWithBackend(screenshot, supabaseAuth?.getAccessToken());
-
-            await hideStatusMessage(tab.id);
-            await sendToContentScript(tab.id, {
-                type: 'SHOW_CONFIRMATION',
-                requestId: `${tab.id}-${Date.now()}`,
-                events: eventDetails.events,
-                screenshot
-            });
-
-            return { success: true };
         } catch (error) {
             // A Screenshot has no basic fallback: a failed Extraction is an
             // error the user sees, not an invented event.
@@ -638,6 +692,33 @@ async function handleScreenshotCapture(tab, region = null, devicePixelRatio = 1)
 
             return { success: false, error: error.message };
         }
+
+        // Out of the try above on purpose. The Extraction has happened and has
+        // been charged for; a page that cannot take the modal is a delivery
+        // problem, and reporting it as a failed Extraction would throw away
+        // Events the user has already paid for.
+        await hideStatusMessage(tab.id);
+
+        try {
+            await sendToContentScript(tab.id, {
+                type: 'SHOW_CONFIRMATION',
+                requestId: `${tab.id}-${Date.now()}`,
+                events: eventDetails.events,
+                screenshot
+            });
+        } catch (error) {
+            console.error('Could not show the Events on the page:', error);
+
+            // The same last resort the Selection path takes: the first Event
+            // opens in Google Calendar directly rather than being lost.
+            if (eventDetails.events?.length > 0) {
+                chrome.tabs.create({ url: createGoogleCalendarUrl(eventDetails.events[0]) });
+            } else {
+                notify('The events could not be shown on this page.');
+            }
+        }
+
+        return { success: true };
     } finally {
         // The Screenshot lives only for this Extraction; nothing is stored.
         activeRequests.delete(tab.id);
@@ -752,6 +833,8 @@ function isAuthError(error) {
     const errorMessage = error.message || '';
     const authErrorPatterns = [
         'authentication failed',
+        // What both backend paths throw when there is no token to send.
+        'authentication required',
         'not authenticated',
         'session expired',
         'invalid token',
@@ -834,6 +917,10 @@ async function processImageWithBackend(imageDataUrl, accessToken) {
 
     const data = await response.json();
     await storeUsageInfo(data.usage);
+
+    // A 200 whose body is not the shape the backend promises is a failed
+    // Extraction, reported as one, rather than a modal built out of nothing.
+    validateEventResponse(data.eventDetails);
 
     return data.eventDetails;
 }
