@@ -55,16 +55,16 @@ Replace the **activeTab** line under PERMISSIONS EXPLAINED:
 ```
 
 ### Privacy practices (developer dashboard)
-**Data Collection → Website Content**: "The text you select, or the screenshot Region you draw, sent only when you trigger the extension. Only the drawn Region is captured; nothing else on the page is."
+**Data Collection → Website Content**: "The text you select, or the screenshot Region you draw, sent only when you trigger the extension. Only the Region you draw is captured — pressing Enter or double-clicking makes that Region the whole visible tab — and nothing outside the visible tab is ever captured."
 
 **Data Sharing → OpenAI**: "Text and images (the selected text or the screenshot Region) are sent to OpenAI to extract event details. Not stored by the extension."
 
 **Data Retention**: "Selected text and screenshots are not retained; they are processed and discarded."
 
 **Permission justification — `activeTab`** (replaces the earlier text):
-> The extension reads the text the user selected on the active tab, and when the user explicitly starts a screenshot (popup button or context-menu item) it captures the visible tab once, crops it in the browser to the rectangle the user drew, and sends only that region for event extraction. Capture happens only on that user gesture; the extension never captures pages on its own, never captures outside the drawn region, and does not store the image.
+> The extension reads the text the user selected on the active tab, and when the user explicitly starts a screenshot (popup button or context-menu item) it captures the visible tab once, crops it in the browser to the rectangle the user drew, and sends only that region for event extraction. Pressing Enter or double-clicking on the overlay makes that rectangle the whole visible tab. Capture happens only on that user gesture; the extension never captures pages on its own, never captures anything outside the visible tab, and does not store the image.
 
-The privacy policy page (`docs/index.html`, published via GitHub Pages) was updated in the same release: collection ("the Selection or the Screenshot Region you choose to send"), "only the Region you draw is captured", retention ("Screenshots are never stored"), and third parties ("OpenAI processes text and images").
+The privacy policy page (`docs/index.html`, published via GitHub Pages) was updated in the same release: collection ("the Selection or the Screenshot Region you choose to send"), "only the Region you draw is captured — Enter or a double-click makes that Region the whole visible tab, and nothing outside the visible tab is ever captured", retention ("Screenshots are never stored"), and third parties ("OpenAI processes text and images").
 
 ### Screenshots to add
 1. Region overlay mid-drag over an event poster

@@ -211,7 +211,7 @@
             <h3>2. The Selection or the Screenshot Region You Choose to Send</h3>
             <p>When you right-click and select "Add to Google Calendar", or start a Screenshot and draw a Region over the page:</p>
             <ul>
-                <li>We receive the text you selected, or the Screenshot Region you drew – a picture of only that part of the visible tab, downscaled before it leaves your browser</li>
+                <li>We receive the text you selected, or the Screenshot Region you drew – a picture of only that part of the visible tab, downscaled before it leaves your browser. Pressing Enter or double-clicking instead of dragging makes the Region the whole visible tab</li>
                 <li>It's sent to OpenAI to extract event details (date, time, title, location)</li>
                 <li><strong>Not stored</strong> – Processed immediately and discarded. A Screenshot is never written to disk or kept after extraction</li>
             </ul>
@@ -236,7 +236,7 @@
                     <td class="no">Never collected</td>
                 </tr>
                 <tr>
-                    <td>Anything you did not explicitly select – only the Region you draw is captured; nothing else on the page is</td>
+                    <td>Anything you did not explicitly select – only the Region you draw is captured, and pressing Enter or double-clicking makes that Region the whole visible tab; nothing outside the visible tab is ever captured</td>
                     <td class="no">Never collected</td>
                 </tr>
                 <tr>
