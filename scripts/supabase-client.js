@@ -27,7 +27,9 @@ class SupabaseAuth {
 
         if (createClientFunc && typeof CONFIG !== 'undefined') {
             console.log('✅ Creating Supabase client...');
-            this.supabase = createClientFunc(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_ANON_KEY, {
+            // Production URL unless a test has stored a backend override.
+            const supabaseUrl = await resolveSupabaseUrl();
+            this.supabase = createClientFunc(supabaseUrl, CONFIG.SUPABASE_ANON_KEY, {
                 auth: {
                     autoRefreshToken: true,   // Automatically refresh tokens before they expire
                     persistSession: false,     // We handle persistence manually via Chrome storage

@@ -74,5 +74,41 @@ const LLM_CONFIG = {
             top_p: this.top_p,
             response_format: { type: 'json_object' }
         };
+    },
+
+    /**
+     * Build the request body for an OpenAI vision (image) extraction call.
+     * Mirrors buildImageRequestBody in supabase/functions/_shared/llm-prompt.ts —
+     * tests/llm-prompt-sync.test.js fails if the two ever drift.
+     * @param {string} imageDataUrl - Data URL of the Screenshot Region (JPEG)
+     * @param {string} currentDateTime - Locale-formatted date/time string
+     * @returns {object}
+     */
+    buildImageRequestBody(imageDataUrl, currentDateTime) {
+        return {
+            model: this.model,
+            messages: [
+                {
+                    role: 'system',
+                    content: this.buildSystemPrompt(currentDateTime)
+                },
+                {
+                    role: 'user',
+                    content: [
+                        {
+                            type: 'text',
+                            text: `Time: ${currentDateTime}\nExtract all calendar events visible in this image (poster, screenshot, schedule, invitation, etc.).`
+                        },
+                        {
+                            type: 'image_url',
+                            image_url: { url: imageDataUrl }
+                        }
+                    ]
+                }
+            ],
+            temperature: this.temperature,
+            top_p: this.top_p,
+            response_format: { type: 'json_object' }
+        };
     }
 };

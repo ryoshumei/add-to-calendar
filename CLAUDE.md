@@ -4,16 +4,18 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Chrome extension that creates Google Calendar events from selected text using OpenAI's natural language processing. The extension supports two authentication modes:
+Chrome extension that creates Google Calendar events from a Source the user points at on a page — a Selection (highlighted text) or a Screenshot (a Region the user draws over the visible tab) — using OpenAI for Extraction. Vocabulary is defined in `CONTEXT.md`. The extension supports two authentication modes:
 - **Authenticated users**: Sign in with Google via Supabase → backend processes events (no API key needed)
 - **Unauthenticated users**: Provide OpenAI API key → client-side processing
 
 ## Architecture
 
 ### Core Components
-- **background.js**: Service worker managing context menus, OpenAI API calls, authentication, and message routing
-- **content.js**: Content script for modal display and user interaction
-- **popup/**: Extension settings popup for API key management and Google sign-in
+- **background.js**: Service worker managing context menus, Screenshot capture, OpenAI API calls, authentication, and message routing
+- **content.js**: Content script for the confirmation modal, the Region overlay, and user interaction
+- **popup/**: Extension settings popup for API key management, Google sign-in, the "Capture screenshot" button and the right-click menu toggle
+- **scripts/screenshot-pipeline.js**: Pure Screenshot pipeline (capture data URL + Region + device pixel ratio → cropped, downscaled JPEG data URL); no DOM dependency
+- **scripts/backend-config.js**: Resolves the Supabase auth, Edge Function and OpenAI URLs; honours a test-only loopback override that is inert in production
 - **config.js**: Public configuration (Supabase URL, Google OAuth client ID)
 - **scripts/supabase-client.js**: Authentication service using Supabase + Chrome Identity API
 - **scripts/calendar-service.js**: Google Calendar URL generation and event creation
@@ -37,6 +39,14 @@ Chrome extension that creates Google Calendar events from selected text using Op
 **Unauthenticated users:**
 1. Same flow but requires OpenAI API key in extension settings
 2. Client-side processing only (no backend service access)
+
+**Screenshot (either mode):**
+1. User clicks "Capture screenshot" in the popup (the popup then closes — also when the page has shown the setup-required modal, so the user can read it) or right-clicks → "Add screenshot to Google Calendar" (available on any page, with or without a Selection; hidden by the popup toggle stored as `showScreenshotMenuItem` in sync storage, default on — the service worker re-applies its menus on change, item by item with `contextMenus.update`/`create` rather than clearing the menu, so the Selection item is never off it)
+2. background.js checks there is a way to extract at all (own key or session) and shows the setup-required modal instead if there is neither, then injects the Region overlay into the active tab (same inject-and-retry as the modal). Drag draws the Region; mouse-up submits it; Esc or a drag under 10 px cancels; Enter or double-click submits the whole visible tab. The overlay hides itself, hides (rather than removes) any open modal, and waits for the next paint — or 100 ms, since a hidden tab paints none — before reporting, so nothing the extension drew is in the capture; a Region that is then refused puts the hidden modal back. All five listeners are on the window in the capture phase and only trusted events drive them, so a page can neither swallow the drag nor spend a request by dispatching its own Enter; an overlay the page removed itself stops driving anything. The Region is reported with the page's viewport size and device pixel ratio
+3. background.js checks the tab is still the one in front — `captureVisibleTab` photographs the window's active tab, not a tab id — then captures the visible tab (`chrome.tabs.captureVisibleTab`, allowed by the existing activeTab grant — no permission was added) and runs the Screenshot pipeline: crop to the Region scaled by capture width ÷ reported viewport width (the device pixel ratio is the fallback when the page reported no viewport), downscale so the longest side is ≤ 1600 px, JPEG quality 0.7; an encoded result over 10 MB is an error
+4. **Priority logic is the same as text**: user's OpenAI key (`processScreenshotWithOpenAI`, request built by `LLM_CONFIG.buildImageRequestBody`) > backend `process-image` endpoint (`processImageWithBackend`, sends the data URL, current date-time and the `X-Extension-Version` header; stores returned usage like text). Having one of the two was settled at step 2. **No basic fallback**: a failed Extraction shows an error in the modal. Any active Selection is ignored; one Source per Extraction
+5. content.js shows the confirmation modal with the Events plus a thumbnail of the sent Region. Every Event card is built through the DOM (model output is text, never markup), and the thumbnail lives in a **closed shadow root** on the host element so page script cannot read the captured pixels back. Delivering the modal is its own step after the Extraction: a page that cannot take it opens the first Event in Google Calendar rather than losing Events the user has been charged for. The image lives only for the one Extraction; nothing is written to storage
+6. The same per-tab in-flight guard as Selection refuses a second capture while one is processing, and says so in the popup that asked. Pages Chrome will not capture (browser pages, the Web Store) show a plain "cannot capture" error
 
 ### Key Patterns
 - **Manifest V3 Service Worker**: background.js is not persistent, uses importScripts for dependencies
@@ -124,11 +134,26 @@ npm install:browsers       # Install Playwright browsers
 npm install:deps          # Install browser system dependencies
 ```
 
+### Backend unit tests (Deno)
+```bash
+npm run test:backend       # deno test supabase/functions/_shared/ — needs no permission flags
+```
+Keep these permission-free: anything that must touch the filesystem belongs in the Playwright suite, so the obvious flagless `deno test` command stays green.
+
 ### Test Organization
-- `tests/*.test.js`: Test suites (extension-loading, popup-ui, context-menu, calendar-integration, etc.)
-- `tests/fixtures/`: Reusable test fixtures (extension-fixtures.js provides context, extensionId, popupPage, testPage)
-- `tests/utils/`: Test helper utilities
+- `tests/*.test.js`: Test suites — `configuration`, `llm-prompt`, `llm-prompt-sync`, `selection-extraction`, `screenshot-pipeline`, `region-overlay`, `screenshot-extraction`, `screenshot-key-path`, `context-menu`, `eval-screenshot-render`
+- `tests/fixtures/`: Reusable test fixtures (extension-fixtures.js provides context, extensionId, popupPage, testPage, stubBackend, sourcePage, stubbedEndpoints, signedIn, ownKey, plus the helpers that drive a Selection, the popup trigger, a Region and a context-menu click)
+- Playwright cannot open a native context menu, so a menu item is driven through `handleContextMenuClick` in the service worker (`clickMenuItem`) and its presence is asked of Chrome with `chrome.contextMenus.update` (`menuItemExists`), which fails for an item Chrome does not have
 - **Configuration**: playwright.config.js defines test settings, reporters (HTML, JSON, list)
+
+### Stub-Backend Harness (end-to-end without the real backend)
+`tests/fixtures/stub-backend.js` runs a local HTTP server that answers the Supabase auth endpoint and the Edge Functions, records every request (headers and body), and serves the page a test drives a Selection from. It costs nothing and touches no network.
+
+- `stubBackend` fixture: starts/stops the server; `stub.events` is the canned answer for `process-text`, `process-image` and the OpenAI route alike, `stub.usage` for the two Edge Functions (the OpenAI route returns events only), `stub.requestsTo(pathname, method)` the assertions. `stub.textResponse` / `stub.imageResponse` / `stub.openAiResponse` (`{ status, body }`) make one endpoint fail instead; `stub.openAiContent` hands the own-key path raw model output (fenced JSON, a single event object, empty) so normalisation can be driven; `stub.responseDelayMs` holds the Edge Function answers back so a test can act mid-Extraction
+- `stubbedEndpoints` fixture: writes the stub's base URL to `backend_base_url_override` in `chrome.storage.local`. `signedIn` builds on it with a session in `supabase_session`, then resets the worker's memoised auth start-up (`authStartUp`/`supabaseAuth`) and re-runs `initializeAuth()` — production deliberately never rebuilds its single client; `ownKey` builds on it with an OpenAI key in `chrome.storage.sync`, for the own-key path
+- `scripts/backend-config.js`: resolves those URLs — the Supabase auth endpoints, the Edge Functions and OpenAI's `/v1/chat/completions`. **With no override stored — every real install — the production URLs are used unchanged**; the extension never writes that key itself. Only an `http://` loopback origin (`localhost`, `127.0.0.1`, `[::1]`) is honoured: the override also moves the own-key OpenAI call, which carries the user's raw key, so anything else stored under that key resolves to production
+- Examples: `tests/selection-extraction.test.js` and `tests/screenshot-extraction.test.js` (trigger → backend request → confirmation modal → popup usage bar), `tests/screenshot-key-path.test.js` (trigger → OpenAI request → confirmation modal, with the backend never contacted)
+- `chrome.tabs.captureVisibleTab` needs the activeTab grant Chrome only gives on a real toolbar click, so a Screenshot test replaces the service worker's `captureVisibleTab` wrapper with a known image; the real capture is a manual check before release
 
 ### Prompt Evals (live LLM, opt-in)
 Real-text extraction cases run against the actual prompt + parser via OpenAI:
@@ -146,6 +171,19 @@ OPENAI_API_KEY=sk-... npm run eval:prompt
 - Compares against committed `eval-baseline.json`; fails on overall drop >0.2, any dimension drop >0.4, any hard-fail, or corpus/baseline hash mismatch
 - Bless improvements explicitly: `npm run eval:judge -- --update-baseline`, then commit the baseline
 - Tier 1 (`eval:prompt`) is the hard pre-deploy gate; Tier 2 measures quality direction when tuning prompts or comparing models
+
+**Screenshot tier — live image extraction** (`npm run eval:screenshot`):
+```bash
+OPENAI_API_KEY=sk-... npm run eval:screenshot
+```
+- Same shape as the text tier, for a Screenshot Source: `LLM_CONFIG.buildImageRequestBody` → chat/completions → `parseEventResponse` → the same `assertEventsMatch` expectations
+- Cases live in `supabase/functions/_shared/eval-screenshot-cases.ts`; each names an HTML fixture in `eval-screenshots/` (invite email, poster, timetable × en/ja). **No images are committed** — Playwright renders each fixture to PNG at run time via `scripts/render-eval-screenshots.js`
+- Needs `npm ci` and `npx playwright install chromium`; Japanese fixtures need CJK fonts on the machine
+- Skipped without `OPENAI_API_KEY`; never runs in CI (live API, costs money, nondeterministic)
+- **Run before deploying any change to the LLM prompt or model**, alongside `eval:prompt` — a full run is 6 vision calls, well under $0.01 on gpt-4.1-mini
+- Rendered Screenshots land in `test-results/screenshot-eval/` (gitignored, replaced each run) so a failing case can be eyeballed
+- Case metadata (both languages per category, one job per case) is checked in the Deno suite (`eval-screenshot-cases.test.ts`); the fixture directory (declared files present, nothing binary committed) and a non-blank render are checked in the Playwright suite (`tests/eval-screenshot-render.test.js`)
+- The judge tier (Tier 2) stays text-only
 
 ### Debugging
 - **Background script**: chrome://extensions/ → Extension details → "service worker" link
@@ -173,6 +211,9 @@ OPENAI_API_KEY=sk-... npm run eval:prompt
 - Usage info: Stored in `chrome.storage.local` and updated after each backend request
 - Visual indicator: Color-coded progress bar (green → yellow → orange → red as usage increases)
 
+### Extraction paths
+A Screenshot follows the same priority as a Selection (`background.js:handleScreenshotCapture`): the user's own OpenAI key first (`processScreenshotWithOpenAI`, built by `LLM_CONFIG.buildImageRequestBody` — the Region never reaches the shared backend), the backend second (`processImageWithBackend`), and with neither a key nor a session the trigger stops at the setup-required modal before the overlay opens (`background.js:startRegionCapture`). A Screenshot has no basic fallback: a failed Extraction is an error the user sees.
+
 ### Backend Service Integration
 **Implemented** (background.js:processWithBackend):
 ```javascript
@@ -198,7 +239,7 @@ if (currentUser && supabaseAuth?.isAuthenticated()) {
 - Throws error if monthly limit exceeded
 
 ### OpenAI Integration
-- Model: gpt-4.1-mini (configurable in background.js:219)
+- Model: gpt-4.1-mini (`LLM_CONFIG.model` in `scripts/llm-prompt.js`, mirrored in `supabase/functions/_shared/llm-prompt.ts`)
 - System prompt enforces JSON-only responses with specific schema
 - Temperature: 0.3 for consistent JSON output
 - Current time passed as reference for relative date parsing
@@ -208,20 +249,21 @@ if (currentUser && supabaseAuth?.isAuthenticated()) {
 - **API Keys**: User's OpenAI key stored in chrome.storage.sync (encrypted by Chrome)
 - **Sessions**: Supabase sessions stored in chrome.storage.local, auto-restored on startup
 - **OAuth**: Client ID in manifest.json is public (designed for OAuth), redirect URI locked to extension ID
-- **Data Flow**: All processing client-side except backend service (when implemented)
+- **Data Flow**: All processing client-side except the backend service (signed-in users without a key)
+- **Screenshots**: only the Region the user draws is captured — Enter or a double-click makes that Region the whole visible tab, and nothing outside the visible tab is ever captured; it is downscaled (≤ 1600 px, JPEG 0.7) before leaving the browser, sent to OpenAI directly (own key) or via the backend, and never written to storage — discarded after the Extraction. On the page it is shown back inside a closed shadow root, so the page it was taken of cannot read the pixels. The privacy policy (`docs/index.html`) and the Web Store material (`docs/CHROME_WEB_STORE_UPDATE.md`) state this; keep them in step with any change here
 - **Supabase Keys**: Public anon key in config.js is safe to expose (designed for client-side use)
 
 ### Extension Permissions
 - `contextMenus`: Right-click menu integration
-- `storage`: API key and session persistence
-- `activeTab`: Access selected text on active tab
+- `storage`: API key and `showScreenshotMenuItem` toggle (sync), session and usage persistence (local)
+- `activeTab`: Access selected text on the active tab, and capture the visible tab when the user starts a Screenshot from the popup or the context-menu item (both are user gestures that grant activeTab). No permission was added for Screenshots; only the Web Store justification text changed
 - `scripting`: Dynamic content script injection
 - `identity`: Chrome Identity API for Google OAuth
 - `host_permissions`: Supabase API access (https://*.supabase.co/*)
 
 ### Common Modifications
-- **LLM Prompt / Model**: Edit `scripts/llm-prompt.js` (client-side) and `supabase/functions/_shared/llm-prompt.ts` (backend) — these must be kept in sync (CI enforces byte-identical prompts via `tests/llm-prompt-sync.test.js`). Run `npm run eval:prompt` before deploying prompt changes
-- **UI Styling**: Edit CSS in content.js:8-72 for modal appearance
+- **LLM Prompt / Model**: Edit `scripts/llm-prompt.js` (client-side) and `supabase/functions/_shared/llm-prompt.ts` (backend) — these must be kept in sync (CI enforces byte-identical prompts via `tests/llm-prompt-sync.test.js`). Run `npm run eval:prompt` and `npm run eval:screenshot` before deploying prompt changes
+- **UI Styling**: Edit the injected stylesheet at the top of `content.js` (the `style.textContent` template) for the modal and the Region overlay
 - **Supabase Config**: Update SUPABASE_URL and SUPABASE_ANON_KEY in config.js
 - **OAuth Client**: Update oauth2.client_id in manifest.json (requires new Google Cloud OAuth app)
 

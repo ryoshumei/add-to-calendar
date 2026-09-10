@@ -2,10 +2,12 @@
 
 // Import configuration and services
 importScripts('config.js');
+importScripts('scripts/backend-config.js');
 importScripts('scripts/supabase-js.min.js'); // Supabase JavaScript client library
 importScripts('scripts/supabase-client.js');
 importScripts('scripts/calendar-service.js');
 importScripts('scripts/llm-prompt.js');
+importScripts('scripts/screenshot-pipeline.js');
 
 // Global authentication state
 let supabaseAuth = null;
@@ -16,18 +18,34 @@ let currentUser = null;
 // This ensures auth is ready when messages arrive
 console.log('🚀 Service worker starting, initializing auth...');
 
+// The worker's one and only start-up. Two auth clients in one worker is a
+// real bug rather than waste: each one listens for auth state changes and each
+// one restores the stored session, and whichever loses that race clears the
+// session out of storage on its way out — signing the user out from under the
+// client that won. The worker's own start-up, onInstalled, onStartup and every
+// wake-up all mean "make sure auth is ready", so they share this one.
+let authStartUp = null;
+
 // Initialize authentication on startup
-async function initializeAuth() {
+function initializeAuth() {
+    if (!authStartUp) {
+        authStartUp = startAuth();
+    }
+    return authStartUp;
+}
+
+async function startAuth() {
     try {
         console.log('🔄 Initializing authentication...');
-        supabaseAuth = new SupabaseAuth();
-        await supabaseAuth.initialize();
-        await supabaseAuth.restoreSession();
+        const auth = new SupabaseAuth();
+        await auth.initialize();
+        supabaseAuth = auth;
+        await auth.restoreSession();
 
-        calendarService = new CalendarService(supabaseAuth);
+        calendarService = new CalendarService(auth);
 
-        if (supabaseAuth.isAuthenticated()) {
-            currentUser = supabaseAuth.currentUser;
+        if (auth.isAuthenticated()) {
+            currentUser = auth.currentUser;
             console.log('✅ User authenticated:', currentUser?.email);
         } else {
             currentUser = null;
@@ -36,28 +54,111 @@ async function initializeAuth() {
         console.log('✅ Authentication initialized successfully');
     } catch (error) {
         console.error('❌ Failed to initialize authentication:', error);
+        // A failure is not remembered: the next caller starts auth again
+        // rather than leaving the worker without it for the rest of its life.
+        // The half-built client goes with it, so that caller builds one
+        // instead of inheriting a client that never finished starting.
+        authStartUp = null;
+        supabaseAuth = null;
+        calendarService = null;
+        currentUser = null;
     }
 }
 
 // Ensure authentication is initialized (for service worker wake-ups)
 async function ensureAuthInitialized() {
-    if (!supabaseAuth) {
-        console.log('⚠️ Auth not initialized, initializing now...');
-        await initializeAuth();
-    }
+    await initializeAuth();
     return supabaseAuth !== null;
 }
 
 // Initialize authentication immediately when service worker loads
 initializeAuth();
 
-// Create context menu when extension is installed
-chrome.runtime.onInstalled.addListener(() => {
-    chrome.contextMenus.create({
+// The right-click item for a Screenshot is optional: a user who only ever
+// starts a capture from the popup can take it off the menu. Sync storage, next
+// to the API key, so the choice follows them across their Chrome profile.
+const SCREENSHOT_MENU_ITEM_SETTING = 'showScreenshotMenuItem';
+
+// Registering is remove-then-create rather than an incremental edit, so the
+// menu always ends up as the setting describes however it got here — install,
+// browser start, or the setting being flipped. Serialised, because two
+// registrations interleaving would try to create an id that already exists.
+let menuRegistration = Promise.resolve();
+
+function registerContextMenus() {
+    menuRegistration = menuRegistration
+        .then(applyContextMenus)
+        .catch(error => {
+            console.error('❌ Could not build the context menu:', error);
+        });
+    return menuRegistration;
+}
+
+async function applyContextMenus() {
+    const { [SCREENSHOT_MENU_ITEM_SETTING]: showScreenshotItem } =
+        await chrome.storage.sync.get({ [SCREENSHOT_MENU_ITEM_SETTING]: true });
+
+    // Item by item, never wiping the menu first: clearing it and building it
+    // again leaves a window in which the user right-clicks and the extension
+    // is simply not there, and the Selection item is not theirs to lose over a
+    // setting about the Screenshot one.
+    await ensureMenuItem({
         id: "addToCalendar",
         title: "Add to Google Calendar",
         contexts: ["selection"]
     });
+
+    if (showScreenshotItem) {
+        // Every context, not just "page": a Screenshot is of the visible tab,
+        // so what the pointer happens to be over makes no difference to it.
+        await ensureMenuItem({
+            id: "addScreenshotToCalendar",
+            title: "Add screenshot to Google Calendar",
+            contexts: ["all"]
+        });
+    } else {
+        await removeMenuItem("addScreenshotToCalendar");
+    }
+}
+
+// Put an item on the menu as described, whether or not Chrome already has it.
+// There is no way to ask what is on the menu, but an update of an item Chrome
+// does not have fails — so the update is the question, and the create is the
+// answer when it comes back no.
+async function ensureMenuItem({ id, ...properties }) {
+    try {
+        await chrome.contextMenus.update(id, properties);
+    } catch (error) {
+        await createMenuItem({ id, ...properties });
+    }
+}
+
+// contextMenus.create hands back an id rather than a promise and reports
+// trouble through runtime.lastError, which would otherwise go unread.
+function createMenuItem(item) {
+    return new Promise((resolve, reject) => {
+        chrome.contextMenus.create(item, () => {
+            const failure = chrome.runtime.lastError;
+            if (failure) {
+                reject(new Error(failure.message));
+            } else {
+                resolve();
+            }
+        });
+    });
+}
+
+async function removeMenuItem(id) {
+    try {
+        await chrome.contextMenus.remove(id);
+    } catch (error) {
+        // It was not on the menu, which is where this was heading anyway.
+    }
+}
+
+// Create context menu when extension is installed
+chrome.runtime.onInstalled.addListener(() => {
+    registerContextMenus();
 
     // Initialize authentication
     initializeAuth();
@@ -65,7 +166,16 @@ chrome.runtime.onInstalled.addListener(() => {
 
 // Handle startup
 chrome.runtime.onStartup.addListener(() => {
+    registerContextMenus();
     initializeAuth();
+});
+
+// The popup writes the setting; the menu it describes is the worker's to
+// build, so it is rebuilt here rather than on the next browser start.
+chrome.storage.onChanged.addListener((changes, namespace) => {
+    if (namespace === 'sync' && changes[SCREENSHOT_MENU_ITEM_SETTING]) {
+        registerContextMenus();
+    }
 });
 
 // Handle messages from popup
@@ -161,6 +271,43 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             });
 
         return true; // Keep the message channel open for async response
+    } else if (request.action === 'captureScreenshot') {
+        // Screenshot trigger from the popup. The popup is not a tab, so the
+        // active tab of the last focused window is the page the user is
+        // looking at. The trigger only opens the Region overlay; the capture
+        // happens once the user has drawn a Region there.
+        console.log('📸 Received captureScreenshot request from popup');
+
+        ensureAuthInitialized()
+            .then(async () => {
+                const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+                return startRegionCapture(tab);
+            })
+            .then(result => sendResponse(result))
+            .catch(error => {
+                console.error('❌ Could not start a Screenshot:', error);
+                sendResponse({ success: false, error: error.message, showInPopup: true });
+            });
+
+        return true; // Keep channel open for async response
+    } else if (request.action === 'regionDrawn') {
+        // The page reports the Region the user drew — null for the whole
+        // visible tab — and the device pixel ratio the capture will be in.
+        console.log('📸 Region drawn, capturing the tab');
+
+        ensureAuthInitialized()
+            .then(() => handleScreenshotCapture(
+                sender.tab,
+                request.region,
+                request.metrics
+            ))
+            .then(result => sendResponse(result))
+            .catch(error => {
+                console.error('❌ Screenshot capture failed:', error);
+                sendResponse({ success: false, error: error.message });
+            });
+
+        return true; // Keep channel open for async response
     } else if (request.action === 'userAuthenticated') {
         currentUser = request.user;
         console.log('User authenticated via popup:', currentUser?.email);
@@ -183,7 +330,34 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 let activeRequests = new Set();
 
 // Handle context menu click events
-chrome.contextMenus.onClicked.addListener(async (info, tab) => {
+chrome.contextMenus.onClicked.addListener((info, tab) => handleContextMenuClick(info, tab));
+
+async function handleContextMenuClick(info, tab) {
+    if (info.menuItemId === "addScreenshotToCalendar") {
+        // A Screenshot is one Source on its own: whatever the user had
+        // highlighted when they right-clicked plays no part in it.
+        //
+        // Nothing that happens in here is allowed to reject: the listener
+        // that called it drops the promise, so a rejection would be an
+        // unhandled one and the user would be told nothing at all.
+        try {
+            await ensureAuthInitialized();
+            const result = await startRegionCapture(tab);
+
+            // No popup is open on this trigger, and the page that could not
+            // run the overlay cannot show a modal either, so this is the one
+            // surface left for saying why nothing happened — unless the page
+            // has already said it, which is what reportedOnPage means.
+            if (result && !result.success && result.error && !result.reportedOnPage) {
+                notify(result.error);
+            }
+        } catch (error) {
+            console.error('Could not start a Screenshot:', error);
+            notify('Error: ' + error.message);
+        }
+        return;
+    }
+
     if (info.menuItemId === "addToCalendar") {
         // Generate a unique request ID using timestamp
         const requestId = `${tab.id}-${Date.now()}`;
@@ -194,14 +368,24 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
             return;
         }
 
+        // Whether this Extraction ran on the user's own OpenAI key, which
+        // decides how a failure is read in the catch below: a key path never
+        // touched Supabase, so nothing it fails with is a session problem.
+        let usedOwnKey = false;
+
         try {
             // Mark this tab as having an active request
             activeRequests.add(tab.id);
 
+            // The same wait the Screenshot branch does: on a cold worker the
+            // session is still being restored, and reading currentUser before
+            // it lands sends a signed-in user down the no-key path.
+            await ensureAuthInitialized();
+
             const selectedText = info.selectionText;
             let eventDetails;
             let result;
-            
+
             // Log current auth state for debugging
             console.log('📊 Auth state check:', {
                 hasCurrentUser: !!currentUser,
@@ -223,6 +407,7 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
                     // Use user's API key (they prefer their own key)
                     console.log('Using user\'s OpenAI API key');
                     await updateStatusMessage(tab.id, 'Analyzing event details...', 'Using your OpenAI API key');
+                    usedOwnKey = true;
                     eventDetails = await processWithOpenAI(selectedText, apiKey);
                 } else {
                     // Priority 2: Use backend service with our API key
@@ -261,43 +446,14 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
                 if (!apiKey) {
                     console.log('❌ No API key found - showing setup guidance');
                     await hideStatusMessage(tab.id);
-                    
-                    // Show modal with setup instructions instead of notification
-                    try {
-                        await chrome.tabs.sendMessage(tab.id, {
-                            type: "SHOW_SETUP_REQUIRED"
-                        });
-                        console.log('✅ Setup modal message sent');
-                    } catch (error) {
-                        console.log('⚠️ Content script not ready, injecting for setup modal...');
-                        // Try to inject content script and retry
-                        try {
-                            await chrome.scripting.executeScript({
-                                target: {tabId: tab.id},
-                                files: ['content.js']
-                            });
-                            await new Promise(resolve => setTimeout(resolve, 100));
-                            await chrome.tabs.sendMessage(tab.id, {
-                                type: "SHOW_SETUP_REQUIRED"
-                            });
-                            console.log('✅ Setup modal sent after injection');
-                        } catch (retryError) {
-                            // Fallback to notification if modal fails completely
-                            console.log('⚠️ Modal failed completely, using notification fallback');
-                            chrome.notifications.create({
-                                type: 'basic',
-                                iconUrl: 'icons/icon128.png',
-                                title: 'Setup Required',
-                                message: 'Please sign in with Google or set your OpenAI API key in extension settings'
-                            });
-                        }
-                    }
+                    await showSetupRequired(tab.id);
                     return;
                 }
 
                 // Process with OpenAI and create calendar URL
                 console.log('✅ Using API key for processing');
                 await updateStatusMessage(tab.id, 'Analyzing event details...', 'Using your OpenAI API key');
+                usedOwnKey = true;
                 eventDetails = await processWithOpenAI(selectedText, apiKey);
                 
                 await updateStatusMessage(tab.id, 'Creating calendar event...', 'Almost done');
@@ -317,7 +473,7 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
             // Try to send message to content script
             // eventDetails now contains { events: [...] } array structure
             try {
-                const response = await chrome.tabs.sendMessage(tab.id, {
+                const response = await sendToContentScript(tab.id, {
                     type: "SHOW_CONFIRMATION",
                     requestId,
                     events: eventDetails.events, // Send events array
@@ -328,86 +484,274 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
                 // If we get here, the content script handled the message
                 console.log('Content script handled message:', response);
             } catch (error) {
-                // If content script isn't ready, inject it
-                console.log('Injecting content script...');
-                await chrome.scripting.executeScript({
-                    target: {tabId: tab.id},
-                    files: ['content.js']
-                });
-
-                // Try sending the message again after a short delay
-                await new Promise(resolve => setTimeout(resolve, 100));
-
-                try {
-                    await chrome.tabs.sendMessage(tab.id, {
-                        type: "SHOW_CONFIRMATION",
-                        requestId,
-                        events: eventDetails.events, // Send events array
-                        calendarUrl: result.calendarUrl,
-                        result: result
-                    });
-                } catch (retryError) {
-                    // If it still fails, open calendar directly for first event
-                    if (result.calendarUrl) {
-                        chrome.tabs.create({url: result.calendarUrl});
-                    } else if (eventDetails.events && eventDetails.events.length > 0) {
-                        chrome.tabs.create({url: createGoogleCalendarUrl(eventDetails.events[0])});
-                    }
+                // The page cannot show the modal at all, so the first Event
+                // opens in Google Calendar directly instead.
+                if (result.calendarUrl) {
+                    chrome.tabs.create({url: result.calendarUrl});
+                } else if (eventDetails.events && eventDetails.events.length > 0) {
+                    chrome.tabs.create({url: createGoogleCalendarUrl(eventDetails.events[0])});
                 }
             }
         } catch (error) {
             console.error("Error processing text:", error);
-            
+
             // Hide status modal
             await hideStatusMessage(tab.id);
-            
-            // Check if it's an auth error
-            if (isAuthError(error)) {
+
+            // Check if it's an auth error. Not on the key path: OpenAI
+            // refusing a key is not a Google session that expired, and the
+            // sign-in modal would send the user somewhere that cannot fix it.
+            if (!usedOwnKey && isAuthError(error)) {
                 await showAuthError(tab.id, error.message);
             } else {
-                chrome.notifications.create({
-                    type: 'basic',
-                    iconUrl: 'icons/icon128.png',
-                    title: 'Calendar Event Creator',
-                    message: 'Error: ' + error.message
-                });
+                notify('Error: ' + error.message);
             }
         } finally {
             // Clean up the active request
             activeRequests.delete(tab.id);
         }
     }
-});
+}
+
+// The last surface left when the page cannot be told and no popup is open.
+function notify(message) {
+    chrome.notifications.create({
+        type: 'basic',
+        iconUrl: 'icons/icon128.png',
+        title: 'Calendar Event Creator',
+        message
+    });
+}
+
+// Chrome refuses to capture browser-internal pages (chrome://, the Web Store)
+// and any page the extension was not invoked on.
+const CANNOT_CAPTURE_MESSAGE =
+    'This page cannot be captured. Chrome does not allow screenshots of browser pages such as chrome:// or the Web Store.';
+
+// The two ways a Screenshot is refused before anything is captured, shared by
+// the trigger that opens the Region overlay and the capture that follows it:
+// a page there is no capturing, and — the same per-tab guard the Selection
+// flow uses — a tab already in the middle of an Extraction, whose second
+// trigger is ignored rather than charged. Null means carry on.
+function screenshotRefusal(tab) {
+    if (!tab) {
+        return { success: false, error: CANNOT_CAPTURE_MESSAGE, showInPopup: true };
+    }
+
+    if (activeRequests.has(tab.id)) {
+        console.log('Request already in progress for this tab');
+        // Ignored, but not silently: the user pressed something, and a
+        // trigger that leaves no trace reads as a dead button.
+        return {
+            success: false,
+            ignored: true,
+            error: 'A Screenshot is already being processed on this tab.',
+            showInPopup: true
+        };
+    }
+
+    return null;
+}
+
+// Capture the visible area of the tab. Split out because Chrome only grants
+// the activeTab permission this needs on a real user gesture, which a test
+// browser cannot produce — a test stands in for this one call.
+async function captureVisibleTab(tab) {
+    return chrome.tabs.captureVisibleTab(tab.windowId, { format: 'png' });
+}
+
+// chrome.tabs.captureVisibleTab takes a window, not a tab: it photographs
+// whichever tab that window is showing. The Region belongs to the tab the user
+// drew it on, and everything between the drag and the capture — the runtime
+// hop, auth start-up, a storage read — is time for them to switch tabs. So the
+// tab is asked whether it is still the one in front; if it is not, nothing is
+// captured, because the Screenshot would be of a page they never pointed at.
+async function isStillInFront(tab) {
+    try {
+        const current = await chrome.tabs.get(tab.id);
+        return Boolean(current?.active) && current.windowId === tab.windowId;
+    } catch (error) {
+        // The tab has been closed since the Region was drawn.
+        console.error('Could not check whether the tab is still in front:', error);
+        return false;
+    }
+}
+
+// What a Screenshot can be extracted with: the user's own OpenAI key, or a
+// Google session that spends one of their monthly requests. With neither,
+// there is nothing to send a Screenshot to.
+async function hasAWayToExtract() {
+    const { apiKey } = await chrome.storage.sync.get('apiKey');
+    return Boolean(apiKey) || Boolean(currentUser && supabaseAuth?.isAuthenticated());
+}
+
+// Open the Region overlay on the page and leave it there: the user draws a
+// Region, and the page reports it back for the capture. A page that cannot run
+// the overlay is a page Chrome would refuse to capture anyway, so that is
+// reported to the popup while it is still open to show it.
+async function startRegionCapture(tab) {
+    const refusal = screenshotRefusal(tab);
+    if (refusal) return refusal;
+
+    // Asked before the overlay opens, not after the Region is drawn: a user
+    // with neither a key nor a session gets the setup guidance instead of a
+    // drag that was never going to send anything.
+    if (!(await hasAWayToExtract())) {
+        console.log('ℹ️ No key and no session for a Screenshot — showing setup guidance');
+        await showSetupRequired(tab.id);
+        return {
+            success: false,
+            error: 'Sign in with Google or set your OpenAI API key to send a Screenshot.',
+            // The page is already saying so; the popup and the notification
+            // would only be saying it twice.
+            reportedOnPage: true
+        };
+    }
+
+    try {
+        await sendToContentScript(tab.id, { type: 'SHOW_REGION_OVERLAY' });
+        return { success: true };
+    } catch (error) {
+        console.error('Could not open the Region overlay:', error);
+        return { success: false, error: CANNOT_CAPTURE_MESSAGE, showInPopup: true };
+    }
+}
+
+// Turn the Region of the visible tab into a Screenshot and run one Extraction
+// on it. The Region is in CSS pixels, or null for the whole visible tab;
+// `metrics` is what the page measured itself in — its viewport size and its
+// device pixel ratio — which is how the Region is placed on the capture.
+async function handleScreenshotCapture(tab, region = null, metrics = {}) {
+    const refusal = screenshotRefusal(tab);
+    if (refusal) return refusal;
+
+    activeRequests.add(tab.id);
+
+    try {
+        // Priority identical to a Selection: the user's own OpenAI key first,
+        // the shared backend second. Having one of the two was settled before
+        // the overlay opened, in startRegionCapture.
+        const { apiKey } = await chrome.storage.sync.get('apiKey');
+
+        if (!(await isStillInFront(tab))) {
+            console.log('The tab the Region was drawn on is no longer in front');
+            await showExtractionError(tab.id, CANNOT_CAPTURE_MESSAGE);
+            return { success: false, error: CANNOT_CAPTURE_MESSAGE };
+        }
+
+        let capture;
+        try {
+            // Captured before any status modal is shown: whatever the
+            // extension draws on the page would otherwise be in the Screenshot.
+            capture = await captureVisibleTab(tab);
+        } catch (error) {
+            // By now the popup the user triggered from has closed, so this is
+            // reported where they are looking: the page.
+            console.error('Could not capture the visible tab:', error);
+            await showExtractionError(tab.id, CANNOT_CAPTURE_MESSAGE);
+            return { success: false, error: CANNOT_CAPTURE_MESSAGE };
+        }
+
+        await sendStatusMessage(
+            tab.id,
+            'Reading this page...',
+            apiKey ? 'Using your OpenAI API key' : 'This may take a few seconds'
+        );
+
+        let screenshot;
+        let eventDetails;
+
+        try {
+            screenshot = await SCREENSHOT_PIPELINE.buildScreenshotDataUrl(
+                capture,
+                region,
+                metrics
+            );
+
+            eventDetails = apiKey
+                ? await processScreenshotWithOpenAI(screenshot, apiKey)
+                // Optional chaining because signing out between the trigger
+                // and the drag leaves no client: that reads as the sign-in
+                // error it is, rather than a TypeError.
+                : await processImageWithBackend(screenshot, supabaseAuth?.getAccessToken());
+        } catch (error) {
+            // A Screenshot has no basic fallback: a failed Extraction is an
+            // error the user sees, not an invented event.
+            console.error('Error extracting from the Screenshot:', error);
+            await hideStatusMessage(tab.id);
+
+            // Only the backend path can hit a Google session problem. On the
+            // key path the Extraction never went near Supabase, so an OpenAI
+            // error that happens to say "unauthorized" is about their key —
+            // asking them to sign in again would send them nowhere useful.
+            if (!apiKey && isAuthError(error)) {
+                await showAuthError(tab.id, error.message);
+            } else {
+                await showExtractionError(tab.id, error.message);
+            }
+
+            return { success: false, error: error.message };
+        }
+
+        // Out of the try above on purpose. The Extraction has happened and has
+        // been charged for; a page that cannot take the modal is a delivery
+        // problem, and reporting it as a failed Extraction would throw away
+        // Events the user has already paid for.
+        await hideStatusMessage(tab.id);
+
+        try {
+            await sendToContentScript(tab.id, {
+                type: 'SHOW_CONFIRMATION',
+                requestId: `${tab.id}-${Date.now()}`,
+                events: eventDetails.events,
+                screenshot
+            });
+        } catch (error) {
+            console.error('Could not show the Events on the page:', error);
+
+            // The same last resort the Selection path takes: the first Event
+            // opens in Google Calendar directly rather than being lost.
+            if (eventDetails.events?.length > 0) {
+                chrome.tabs.create({ url: createGoogleCalendarUrl(eventDetails.events[0]) });
+            } else {
+                notify('The events could not be shown on this page.');
+            }
+        }
+
+        return { success: true };
+    } finally {
+        // The Screenshot lives only for this Extraction; nothing is stored.
+        activeRequests.delete(tab.id);
+    }
+}
+
+// Send a message to the page, injecting the content script once if it has not
+// loaded yet — the same retry the status modal uses.
+async function sendToContentScript(tabId, message) {
+    try {
+        return await chrome.tabs.sendMessage(tabId, message);
+    } catch (error) {
+        console.log('⚠️ Content script not ready, injecting...', error.message);
+        await chrome.scripting.executeScript({ target: { tabId }, files: ['content.js'] });
+        await new Promise(resolve => setTimeout(resolve, 100));
+        return await chrome.tabs.sendMessage(tabId, message);
+    }
+}
 
 // Helper functions for status messages
 async function sendStatusMessage(tabId, message, detail = '') {
     console.log('📤 Sending status message:', message, detail);
     try {
-        await chrome.tabs.sendMessage(tabId, {
+        await sendToContentScript(tabId, {
             type: "SHOW_STATUS",
             message: message,
             detail: detail
         });
         console.log('✅ Status message sent successfully');
     } catch (error) {
-        console.log('⚠️ Content script not ready, injecting...', error.message);
-        // Inject content script if not loaded
-        try {
-            await chrome.scripting.executeScript({
-                target: {tabId: tabId},
-                files: ['content.js']
-            });
-            console.log('✅ Content script injected');
-            await new Promise(resolve => setTimeout(resolve, 100));
-            await chrome.tabs.sendMessage(tabId, {
-                type: "SHOW_STATUS",
-                message: message,
-                detail: detail
-            });
-            console.log('✅ Status message sent after injection');
-        } catch (e) {
-            console.error('❌ Failed to show status message:', e);
-        }
+        // A page that cannot show progress can still show the result, so this
+        // is as far as it goes.
+        console.error('❌ Failed to show status message:', error);
     }
 }
 
@@ -450,6 +794,38 @@ async function showAuthError(tabId, errorMessage) {
     }
 }
 
+// Show a failed Extraction in the page, with the same message the Selection
+// flow would report.
+async function showExtractionError(tabId, errorMessage) {
+    try {
+        await sendToContentScript(tabId, {
+            type: "SHOW_EXTRACTION_ERROR",
+            message: errorMessage
+        });
+    } catch (error) {
+        chrome.notifications.create({
+            type: 'basic',
+            iconUrl: 'icons/icon128.png',
+            title: 'Calendar Event Creator',
+            message: 'Error: ' + errorMessage
+        });
+    }
+}
+
+// Show the setup guidance modal for a user with neither a session nor a key.
+async function showSetupRequired(tabId) {
+    try {
+        await sendToContentScript(tabId, { type: "SHOW_SETUP_REQUIRED" });
+    } catch (error) {
+        chrome.notifications.create({
+            type: 'basic',
+            iconUrl: 'icons/icon128.png',
+            title: 'Setup Required',
+            message: 'Please sign in with Google or set your OpenAI API key in extension settings'
+        });
+    }
+}
+
 // Check if error is an authentication error
 function isAuthError(error) {
     if (!error) return false;
@@ -457,6 +833,8 @@ function isAuthError(error) {
     const errorMessage = error.message || '';
     const authErrorPatterns = [
         'authentication failed',
+        // What both backend paths throw when there is no token to send.
+        'authentication required',
         'not authenticated',
         'session expired',
         'invalid token',
@@ -469,6 +847,82 @@ function isAuthError(error) {
     return authErrorPatterns.some(pattern => 
         errorMessage.toLowerCase().includes(pattern.toLowerCase())
     );
+}
+
+// Turn a failed Edge Function response into the error the user sees. Shared by
+// the Selection and Screenshot paths so both report a session expiry or a
+// monthly limit in the same words.
+async function backendResponseError(response) {
+    if (response.status === 401) {
+        return new Error('Session expired. Please sign in again with Google.');
+    }
+
+    let errorData = {};
+    try {
+        errorData = await response.json();
+    } catch (error) {
+        // A body that is not JSON tells us nothing beyond the status.
+    }
+
+    if (errorData.error && errorData.error.includes('Monthly limit exceeded')) {
+        return new Error(errorData.error);
+    }
+
+    if (errorData.error && (
+        errorData.error.includes('authentication') ||
+        errorData.error.includes('unauthorized') ||
+        errorData.error.includes('session')
+    )) {
+        return new Error('Authentication failed. Please sign in again with Google.');
+    }
+
+    return new Error(errorData.error || `Backend processing failed: ${response.status}`);
+}
+
+// Remember what the backend said this Extraction cost, so the popup's usage
+// bar shows it.
+async function storeUsageInfo(usage) {
+    if (!usage) return;
+
+    console.log(`Usage: ${usage.usageCount}/${usage.limit} for ${usage.yearMonth}`);
+    await chrome.storage.local.set({ usage_info: usage });
+}
+
+// Send a Screenshot to the backend for Extraction. Unlike the Selection path
+// there is no basic fallback: an Extraction that fails is reported as an error.
+async function processImageWithBackend(imageDataUrl, accessToken) {
+    if (!accessToken) {
+        throw new Error('Authentication required. Please sign in with Google.');
+    }
+
+    const manifest = chrome.runtime.getManifest();
+    const endpoint = await resolveBackendUrl(CONFIG.EDGE_FUNCTIONS.PROCESS_IMAGE);
+
+    const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${accessToken}`,
+            'X-Extension-Version': manifest.version,
+        },
+        // currentDateTime: the browser's local time (with timezone) so
+        // relative dates ("tomorrow") resolve against the user's clock,
+        // not the Edge Function's UTC clock.
+        body: JSON.stringify({ image: imageDataUrl, currentDateTime: new Date().toString() })
+    });
+
+    if (!response.ok) {
+        throw await backendResponseError(response);
+    }
+
+    const data = await response.json();
+    await storeUsageInfo(data.usage);
+
+    // A 200 whose body is not the shape the backend promises is a failed
+    // Extraction, reported as one, rather than a modal built out of nothing.
+    validateEventResponse(data.eventDetails);
+
+    return data.eventDetails;
 }
 
 // Process text with backend service
@@ -484,7 +938,9 @@ async function processWithBackend(text, accessToken) {
         // Get extension version from manifest
         const manifest = chrome.runtime.getManifest();
 
-        const response = await fetch(CONFIG.EDGE_FUNCTIONS.PROCESS_TEXT, {
+        const endpoint = await resolveBackendUrl(CONFIG.EDGE_FUNCTIONS.PROCESS_TEXT);
+
+        const response = await fetch(endpoint, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -497,40 +953,16 @@ async function processWithBackend(text, accessToken) {
             body: JSON.stringify({ selectedText: text, currentDateTime: new Date().toString() })
         });
 
-        // Check for auth errors
-        if (response.status === 401) {
-            throw new Error('Session expired. Please sign in again with Google.');
-        }
-
+        // A 401 or a usage limit is reported in the same words as on the
+        // Screenshot path, and neither falls back to basic event creation.
         if (!response.ok) {
-            const errorData = await response.json();
-
-            // Check if it's a usage limit error
-            if (errorData.error && errorData.error.includes('Monthly limit exceeded')) {
-                // Don't fall back to basic for limit errors - let user know they need to upgrade or wait
-                throw new Error(errorData.error);
-            }
-            
-            // Check for other auth-related errors
-            if (errorData.error && (
-                errorData.error.includes('authentication') ||
-                errorData.error.includes('unauthorized') ||
-                errorData.error.includes('session')
-            )) {
-                throw new Error('Authentication failed. Please sign in again with Google.');
-            }
-
-            throw new Error(errorData.error || `Backend processing failed: ${response.status}`);
+            throw await backendResponseError(response);
         }
 
         const data = await response.json();
         console.log('Backend processing successful:', data.eventDetails);
 
-        // Store usage information if present
-        if (data.usage) {
-            console.log(`Usage: ${data.usage.usageCount}/${data.usage.limit} for ${data.usage.yearMonth}`);
-            await chrome.storage.local.set({ usage_info: data.usage });
-        }
+        await storeUsageInfo(data.usage);
 
         return data.eventDetails;
     } catch (error) {
@@ -552,66 +984,89 @@ async function processWithBackend(text, accessToken) {
     }
 }
 
+// Run one Extraction against OpenAI with the user's own key and hand back the
+// Events, whatever shape the model answered in. Shared by the Selection and
+// the Screenshot key paths so both normalise and validate the same way.
+async function extractWithOpenAI(requestBody, apiKey) {
+    const endpoint = await resolveOpenAiUrl();
+
+    const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${apiKey}`
+        },
+        body: JSON.stringify(requestBody)
+    });
+
+    if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error?.message || 'API request failed');
+    }
+
+    const data = await response.json();
+    const content = data?.choices?.[0]?.message?.content;
+    // Log the raw response for debugging
+    console.log('Raw GPT response:', content);
+
+    // Mirrors supabase/functions/_shared/parse-event-response.ts —
+    // empty/null content and an empty events array are valid no-event results.
+    if (!content || !content.trim()) {
+        return { events: [] };
+    }
+
+    const cleaned = content
+        .trim()
+        .replace(/^```(?:json)?\s*/i, '')
+        .replace(/\s*```$/i, '');
+
+    let parsed;
+    try {
+        parsed = JSON.parse(cleaned);
+    } catch (parseError) {
+        console.error('JSON Parse Error:', parseError);
+        console.error('Raw content:', content);
+        throw new Error('Failed to parse GPT response as JSON');
+    }
+
+    // Backward compatibility: wrap single event in events array
+    if (!Array.isArray(parsed.events) && parsed.title) {
+        parsed = { events: [parsed] };
+    }
+    if (!Array.isArray(parsed.events)) {
+        parsed = { events: [] };
+    }
+
+    validateEventResponse(parsed);
+    return parsed;
+}
+
 // Process text with OpenAI API
 async function processWithOpenAI(text, apiKey) {
     const now = new Date();
     const currentDateTime = now.toLocaleString();
 
     try {
-        const response = await fetch('https://api.openai.com/v1/chat/completions', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${apiKey}`
-            },
-            body: JSON.stringify(LLM_CONFIG.buildRequestBody(text, currentDateTime))
-        });
-
-        if (!response.ok) {
-            const errorData = await response.json();
-            throw new Error(errorData.error?.message || 'API request failed');
-        }
-
-        const data = await response.json();
-        const content = data?.choices?.[0]?.message?.content;
-        // Log the raw response for debugging
-        console.log('Raw GPT response:', content);
-
-        // Mirrors supabase/functions/_shared/parse-event-response.ts —
-        // empty/null content and an empty events array are valid no-event results.
-        if (!content || !content.trim()) {
-            return { events: [] };
-        }
-
-        const cleaned = content
-            .trim()
-            .replace(/^```(?:json)?\s*/i, '')
-            .replace(/\s*```$/i, '');
-
-        let parsed;
-        try {
-            parsed = JSON.parse(cleaned);
-        } catch (parseError) {
-            console.error('JSON Parse Error:', parseError);
-            console.error('Raw content:', content);
-            throw new Error('Failed to parse GPT response as JSON');
-        }
-
-        // Backward compatibility: wrap single event in events array
-        if (!Array.isArray(parsed.events) && parsed.title) {
-            parsed = { events: [parsed] };
-        }
-        if (!Array.isArray(parsed.events)) {
-            parsed = { events: [] };
-        }
-
-        validateEventResponse(parsed);
-        return parsed;
+        return await extractWithOpenAI(LLM_CONFIG.buildRequestBody(text, currentDateTime), apiKey);
     } catch (error) {
         console.error('Error calling OpenAI API:', error);
         throw new Error('Failed to process text: ' + error.message);
     }
 }
+
+// Send a Screenshot straight to OpenAI with the user's own key: their Region
+// never reaches the shared backend, which is what a saved key buys them on the
+// Selection path too. The error is reported as it came, so a key problem does
+// not read as a session problem.
+async function processScreenshotWithOpenAI(screenshotDataUrl, apiKey) {
+    const currentDateTime = new Date().toLocaleString();
+
+    return extractWithOpenAI(
+        LLM_CONFIG.buildImageRequestBody(screenshotDataUrl, currentDateTime),
+        apiKey
+    );
+}
+
 // Create Google Calendar URL with optional timezone support
 function createGoogleCalendarUrl(eventDetails, timezone = null) {
     const baseUrl = 'https://calendar.google.com/calendar/render';

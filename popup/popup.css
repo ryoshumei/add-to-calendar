@@ -126,6 +126,46 @@ h2 {
     font-size: 18px;
 }
 
+/* Screenshot capture */
+.capture-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    width: 100%;
+    padding: 11px 16px;
+    background-color: #4285f4;
+    border: none;
+    border-radius: 6px;
+    color: #fff;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background-color 0.2s;
+}
+
+.capture-btn:hover {
+    background-color: #3367d6;
+}
+
+/* Sits under the capture button: the other way of reaching the same thing. */
+.setting-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: -4px;
+    color: #6a737d;
+    font-size: 13px;
+    line-height: 1.4;
+    cursor: pointer;
+}
+
+.setting-row input {
+    margin: 0;
+    accent-color: #4285f4;
+    cursor: pointer;
+}
+
 /* Authentication Section */
 .auth-section {
     display: flex;

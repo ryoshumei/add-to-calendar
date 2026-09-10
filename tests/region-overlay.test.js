@@ -1,0 +1,455 @@
+// tests/region-overlay.test.js
+// The Region overlay is what the user drags on: the trigger opens it, the
+// rectangle follows the pointer, and how it closes decides whether anything is
+// captured at all. Everything here is observed in the page and at the stub —
+// the overlay's visible state, and whether a Screenshot reached the backend.
+import {
+  test,
+  expect,
+  openPopup,
+  waitForPopupReady,
+  standInForCapture,
+  capturesTaken,
+  imageSize,
+  triggerCapture,
+  drawRegion,
+  captureFromPopup,
+  tabIdFor,
+} from './fixtures/extension-fixtures.js';
+
+const PROCESS_IMAGE_PATH = '/functions/v1/process-image';
+const OVERLAY = '#calendar-region-overlay';
+const REGION_RECT = `${OVERLAY} .region-rect`;
+
+// What Chrome counts as a double-click: two clicks up to about this far apart.
+// The overlay's own mis-click wait is written against it, and is not readable
+// from here — the content script's constants live in the isolated world — so
+// this is the contract both ends of that wait are asserted against.
+const DOUBLE_CLICK_WINDOW_MS = 500;
+
+// Puts the tab in the state a Selection Extraction already running on it would:
+// the per-tab guard the two Sources share refuses a second one.
+async function busyTab(context, tabId) {
+  const [serviceWorker] = context.serviceWorkers();
+  await serviceWorker.evaluate((id) => activeRequests.add(id), tabId);
+}
+
+// A stand-in capture small enough that the 1600 px cap never bites, so a
+// Screenshot of these dimensions is the whole visible tab and nothing less.
+const WHOLE_TAB = { width: 1200, height: 800 };
+
+// A dismissal is only a dismissal if nothing was captured. Drawing a Region
+// afterwards settles it either way: the overlay still works, and the tab was
+// captured once — for this Region, not for the one that was dismissed.
+async function expectDismissedWithNothingCaptured(
+  { context, extensionId, stubBackend, sourcePage }
+) {
+  await expect(sourcePage.locator(OVERLAY)).toHaveCount(0);
+
+  await captureFromPopup(context, extensionId, sourcePage);
+
+  await expect(sourcePage.locator('.calendar-modal-overlay .event-card')).toHaveCount(1);
+  expect(await capturesTaken(context)).toBe(1);
+  expect(stubBackend.requestsTo(PROCESS_IMAGE_PATH, 'POST')).toHaveLength(1);
+}
+
+// Holds the capture at the moment the service worker asks for it, so a test
+// can look at the page as the camera would see it. Returns a release.
+async function holdTheCapture(context) {
+  const [serviceWorker] = context.serviceWorkers();
+
+  await serviceWorker.evaluate(() => {
+    const standIn = self.captureVisibleTab;
+    self.captureReached = false;
+    self.captureVisibleTab = async (tab) => {
+      self.captureReached = true;
+      await new Promise((release) => {
+        self.releaseCapture = release;
+      });
+      return standIn(tab);
+    };
+  });
+
+  return {
+    reached: () =>
+      expect
+        .poll(() => serviceWorker.evaluate(() => self.captureReached))
+        .toBe(true),
+    release: () => serviceWorker.evaluate(() => self.releaseCapture()),
+  };
+}
+
+// Drags the pointer to a corner and settles on the rectangle that corner
+// makes, in CSS pixels.
+//
+// The pointer is not the test's alone: the browser delivers a mousemove of its
+// own at the desktop cursor whenever it raises the window — the popup closing
+// itself over the page does exactly that — and one landing mid-drag stretches
+// the rectangle to a corner the test never dragged to. A real user's cursor is
+// that cursor, so this is the harness catching up rather than the overlay
+// misbehaving: the move is repeated until the rectangle is the one the drag
+// asks for, which also covers the move → layout round-trip.
+async function expectRectangleDraggingTo(sourcePage, corner, expected) {
+  await expect
+    .poll(async () => {
+      await sourcePage.mouse.move(corner.x, corner.y);
+      return sourcePage.locator(REGION_RECT).boundingBox();
+    })
+    .toEqual(expected);
+}
+
+// Opens the overlay the way a user does, and leaves the pointer pressed at the
+// corner the Region starts from.
+async function startDrawing(context, extensionId, sourcePage, from) {
+  await standInForCapture(context, sourcePage);
+  await triggerCapture(context, extensionId, sourcePage);
+  await expect(sourcePage.locator(OVERLAY)).toBeVisible();
+
+  await sourcePage.bringToFront();
+  await sourcePage.mouse.move(from.x, from.y);
+  await sourcePage.mouse.down();
+}
+
+test.describe('Region overlay', () => {
+  test('the popup trigger opens the overlay on the page', async ({
+    context,
+    extensionId,
+    stubBackend,
+    sourcePage,
+    signedIn,
+  }) => {
+    await standInForCapture(context, sourcePage);
+
+    await triggerCapture(context, extensionId, sourcePage);
+
+    await expect(sourcePage.locator(OVERLAY)).toBeVisible();
+    expect(stubBackend.requestsTo(PROCESS_IMAGE_PATH, 'POST')).toHaveLength(0);
+  });
+
+  test('the popup gets out of the way once the overlay is open', async ({
+    context,
+    extensionId,
+    stubBackend,
+    sourcePage,
+    signedIn,
+  }) => {
+    await standInForCapture(context, sourcePage);
+
+    const popupPage = await triggerCapture(context, extensionId, sourcePage);
+
+    await expect(sourcePage.locator(OVERLAY)).toBeVisible();
+    // The real popup floats over the page: left open, the user's first
+    // mousedown dismisses the popup instead of starting the drag.
+    await expect.poll(() => popupPage.isClosed()).toBe(true);
+  });
+
+  test('the rectangle follows the pointer as the Region is drawn', async ({
+    context,
+    extensionId,
+    stubBackend,
+    sourcePage,
+    signedIn,
+  }) => {
+    await startDrawing(context, extensionId, sourcePage, { x: 120, y: 90 });
+
+    await expectRectangleDraggingTo(
+      sourcePage,
+      { x: 320, y: 250 },
+      { x: 120, y: 90, width: 200, height: 160 }
+    );
+
+    await expectRectangleDraggingTo(
+      sourcePage,
+      { x: 420, y: 200 },
+      { x: 120, y: 90, width: 300, height: 110 }
+    );
+  });
+
+  test('Esc dismisses the overlay and captures nothing', async ({
+    context,
+    extensionId,
+    stubBackend,
+    sourcePage,
+    signedIn,
+  }) => {
+    await startDrawing(context, extensionId, sourcePage, { x: 120, y: 90 });
+    await sourcePage.mouse.move(320, 250);
+
+    await sourcePage.keyboard.press('Escape');
+
+    await expectDismissedWithNothingCaptured({ context, extensionId, stubBackend, sourcePage });
+  });
+
+  test('Esc dismisses an overlay nothing has been drawn on', async ({
+    context,
+    extensionId,
+    stubBackend,
+    sourcePage,
+    signedIn,
+  }) => {
+    await standInForCapture(context, sourcePage);
+    await triggerCapture(context, extensionId, sourcePage);
+    await expect(sourcePage.locator(OVERLAY)).toBeVisible();
+
+    await sourcePage.keyboard.press('Escape');
+
+    await expectDismissedWithNothingCaptured({ context, extensionId, stubBackend, sourcePage });
+  });
+
+  test('a drag under 10 px is a mis-click: it dismisses and captures nothing', async ({
+    context,
+    extensionId,
+    stubBackend,
+    sourcePage,
+    signedIn,
+  }) => {
+    await startDrawing(context, extensionId, sourcePage, { x: 200, y: 160 });
+
+    await sourcePage.mouse.move(207, 168);
+    await sourcePage.mouse.up();
+
+    await expectDismissedWithNothingCaptured({ context, extensionId, stubBackend, sourcePage });
+  });
+
+  test('a mis-click leaves the overlay up long enough for a slow double-click', async ({
+    context,
+    extensionId,
+    stubBackend,
+    sourcePage,
+    signedIn,
+  }) => {
+    await startDrawing(context, extensionId, sourcePage, { x: 200, y: 160 });
+
+    // The first half of a double-click: a press and release that went nowhere.
+    await sourcePage.mouse.up();
+
+    // Chrome counts a second click up to about DOUBLE_CLICK_WINDOW_MS later as
+    // a double-click, so the overlay has to still be there well into that gap.
+    await sourcePage.waitForTimeout(DOUBLE_CLICK_WINDOW_MS * 0.6);
+    await expect(sourcePage.locator(OVERLAY)).toBeVisible();
+
+    // And it is a wait, not a stay: a mis-click that leaves the overlay up for
+    // ever is a mis-click that never dismissed it.
+    await expect
+      .poll(() => sourcePage.locator(OVERLAY).count(), {
+        timeout: DOUBLE_CLICK_WINDOW_MS * 4,
+      })
+      .toBe(0);
+  });
+
+  test('Enter sends the whole visible tab', async ({
+    context,
+    extensionId,
+    stubBackend,
+    sourcePage,
+    signedIn,
+  }) => {
+    await standInForCapture(context, sourcePage, WHOLE_TAB);
+    await triggerCapture(context, extensionId, sourcePage);
+    await expect(sourcePage.locator(OVERLAY)).toBeVisible();
+
+    await sourcePage.keyboard.press('Enter');
+
+    await expect(sourcePage.locator('.calendar-modal-overlay .event-card')).toHaveCount(1);
+    const [post] = stubBackend.requestsTo(PROCESS_IMAGE_PATH, 'POST');
+    expect(await imageSize(sourcePage, post.body.image)).toEqual(WHOLE_TAB);
+  });
+
+  test('a double-click sends the whole visible tab', async ({
+    context,
+    extensionId,
+    stubBackend,
+    sourcePage,
+    signedIn,
+  }) => {
+    await standInForCapture(context, sourcePage, WHOLE_TAB);
+    await triggerCapture(context, extensionId, sourcePage);
+    await expect(sourcePage.locator(OVERLAY)).toBeVisible();
+
+    // Each half of the double-click is a mis-click sized drag on its own, so
+    // this also pins that the first one does not take the overlay away first.
+    await sourcePage.mouse.dblclick(240, 180);
+
+    await expect(sourcePage.locator('.calendar-modal-overlay .event-card')).toHaveCount(1);
+    const [post] = stubBackend.requestsTo(PROCESS_IMAGE_PATH, 'POST');
+    expect(await imageSize(sourcePage, post.body.image)).toEqual(WHOLE_TAB);
+  });
+
+  test('input the page dispatched itself sends nothing', async ({
+    context,
+    extensionId,
+    stubBackend,
+    sourcePage,
+    signedIn,
+  }) => {
+    await standInForCapture(context, sourcePage, WHOLE_TAB);
+    await triggerCapture(context, extensionId, sourcePage);
+    await expect(sourcePage.locator(OVERLAY)).toBeVisible();
+
+    // A script on the page is not the user, and cannot spend one of their
+    // monthly requests on a Screenshot of their tab.
+    await sourcePage.evaluate(() => {
+      // Held before the first dispatch, so an overlay that wrongly took the
+      // Enter is reported by the assertions rather than by a missing element.
+      const overlay = document.querySelector('#calendar-region-overlay');
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+      overlay.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
+    });
+
+    // Still waiting for a real drag, which then works as it always did.
+    await expect(sourcePage.locator(OVERLAY)).toBeVisible();
+    await drawRegion(sourcePage, { x: 100, y: 120, width: 260, height: 160 });
+
+    await expect(sourcePage.locator('.calendar-modal-overlay .event-card')).toHaveCount(1);
+    expect(await capturesTaken(context)).toBe(1);
+    expect(stubBackend.requestsTo(PROCESS_IMAGE_PATH, 'POST')).toHaveLength(1);
+  });
+
+  test('a page that swallows input cannot stop the Region being drawn', async ({
+    context,
+    extensionId,
+    stubBackend,
+    sourcePage,
+    signedIn,
+  }) => {
+    await standInForCapture(context, sourcePage);
+    await triggerCapture(context, extensionId, sourcePage);
+    await expect(sourcePage.locator(OVERLAY)).toBeVisible();
+
+    // Plenty of pages stop events on their way down — a canvas app, an editor,
+    // a modal of the page's own. The two that start and shortcut a Region are
+    // exactly the ones that used to be reachable only after that descent.
+    await sourcePage.evaluate(() => {
+      window.addEventListener('mousedown', (event) => event.stopPropagation(), true);
+      window.addEventListener('mouseup', (event) => event.stopPropagation(), true);
+      window.addEventListener('dblclick', (event) => event.stopPropagation(), true);
+    });
+
+    await drawRegion(sourcePage, { x: 100, y: 120, width: 260, height: 160 });
+
+    await expect(sourcePage.locator('.calendar-modal-overlay .event-card')).toHaveCount(1);
+    expect(stubBackend.requestsTo(PROCESS_IMAGE_PATH, 'POST')).toHaveLength(1);
+  });
+
+  test('nothing the extension drew is on the page when the tab is captured', async ({
+    context,
+    extensionId,
+    stubBackend,
+    sourcePage,
+    signedIn,
+  }) => {
+    await standInForCapture(context, sourcePage);
+
+    // An earlier Extraction leaves its confirmation modal on the page, and it
+    // would be in the next Screenshot as surely as the overlay would.
+    await captureFromPopup(context, extensionId, sourcePage);
+    await expect(sourcePage.locator('.calendar-modal-overlay .event-card')).toHaveCount(1);
+
+    const capture = await holdTheCapture(context);
+    await triggerCapture(context, extensionId, sourcePage);
+    await expect(sourcePage.locator(OVERLAY)).toBeVisible();
+    await drawRegion(sourcePage, { x: 100, y: 120, width: 260, height: 160 });
+    await capture.reached();
+
+    // Out of the picture, both of them: the overlay is gone and the modal is
+    // not being painted, which is all the camera cares about.
+    expect(await sourcePage.locator(OVERLAY).count()).toBe(0);
+    await expect(sourcePage.locator('.calendar-modal-overlay')).toBeHidden();
+
+    // What was hidden for the capture is replaced by the Events just read.
+    await capture.release();
+    await expect(sourcePage.locator('.calendar-modal-overlay .event-card')).toBeVisible();
+    await expect(sourcePage.locator('.calendar-modal-overlay .event-card')).toHaveCount(1);
+  });
+
+  test('a Region the worker refuses leaves the earlier Events on the page', async ({
+    context,
+    extensionId,
+    stubBackend,
+    sourcePage,
+    signedIn,
+  }) => {
+    await standInForCapture(context, sourcePage);
+
+    // Events from an Extraction the user has already been charged for, which
+    // they have not acted on yet.
+    await captureFromPopup(context, extensionId, sourcePage);
+    await expect(sourcePage.locator('.calendar-modal-overlay .event-card')).toHaveCount(1);
+
+    // They start a second Screenshot, and something else claims the tab before
+    // they finish drawing — a Selection Extraction from the right-click menu.
+    const sourceTabId = await tabIdFor(context, sourcePage);
+    await triggerCapture(context, extensionId, sourcePage);
+    await expect(sourcePage.locator(OVERLAY)).toBeVisible();
+    await busyTab(context, sourceTabId);
+
+    await drawRegion(sourcePage, { x: 100, y: 120, width: 260, height: 160 });
+
+    // Nothing was captured, so nothing replaced what they were looking at.
+    await expect(sourcePage.locator('.calendar-modal-overlay')).toBeVisible();
+    await expect(sourcePage.locator('.calendar-modal-overlay .event-card')).toHaveCount(1);
+    expect(await capturesTaken(context)).toBe(1);
+    expect(stubBackend.requestsTo(PROCESS_IMAGE_PATH, 'POST')).toHaveLength(1);
+  });
+
+  test('an overlay the page removed itself stops driving anything', async ({
+    context,
+    extensionId,
+    stubBackend,
+    sourcePage,
+    signedIn,
+  }) => {
+    await standInForCapture(context, sourcePage);
+    await triggerCapture(context, extensionId, sourcePage);
+    await expect(sourcePage.locator(OVERLAY)).toBeVisible();
+
+    // A page is free to tear its own DOM down. The listeners that drive the
+    // overlay are on the window, so they outlive the layer they belong to —
+    // and a stray Enter afterwards would send the whole visible tab and spend
+    // one of the user's monthly requests.
+    await sourcePage.evaluate(() => {
+      document.querySelector('#calendar-region-overlay').remove();
+    });
+
+    await sourcePage.keyboard.press('Enter');
+    await sourcePage.mouse.dblclick(240, 180);
+
+    await expectDismissedWithNothingCaptured({ context, extensionId, stubBackend, sourcePage });
+  });
+
+  test('a page the overlay cannot open on is reported in the popup', async ({
+    context,
+    extensionId,
+    stubBackend,
+    signedIn,
+  }) => {
+    // A browser page: Chrome runs no content script here, and would refuse to
+    // capture it either way. The popup is still open, so it says so.
+    const browserPage = await context.newPage();
+    await browserPage.goto('chrome://version');
+    const popupPage = await openPopup(context, extensionId);
+
+    await browserPage.bringToFront();
+    await waitForPopupReady(popupPage);
+    await popupPage.locator('#captureScreenshotBtn').click();
+
+    await expect(popupPage.locator('#message')).toContainText('cannot be captured');
+    expect(stubBackend.requestsTo(PROCESS_IMAGE_PATH, 'POST')).toHaveLength(0);
+  });
+
+  test('a Region drawn towards the top left is the same rectangle', async ({
+    context,
+    extensionId,
+    stubBackend,
+    sourcePage,
+    signedIn,
+  }) => {
+    await startDrawing(context, extensionId, sourcePage, { x: 420, y: 300 });
+
+    await expectRectangleDraggingTo(
+      sourcePage,
+      { x: 220, y: 140 },
+      { x: 220, y: 140, width: 200, height: 160 }
+    );
+  });
+});

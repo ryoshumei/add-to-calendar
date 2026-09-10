@@ -1,5 +1,14 @@
 // tests/configuration.test.js
 import { test, expect } from './fixtures/extension-fixtures.js';
+import fs from 'fs';
+import path from 'path';
+
+// The version in package.json, read from disk: the release number the manifest
+// has to agree with.
+function packageVersion() {
+  const packageFile = path.resolve(__dirname, '..', 'package.json');
+  return JSON.parse(fs.readFileSync(packageFile, 'utf-8')).version;
+}
 
 test.describe('Configuration Management', () => {
   test.describe('CONFIG Object Loading', () => {
@@ -194,6 +203,11 @@ test.describe('Configuration Management', () => {
 
       // Check manifest version
       expect(manifestPermissions.manifestVersion).toBe(3);
+
+      // The version the backend reads from the X-Extension-Version header is
+      // the manifest's, and package.json says the same thing: one number to
+      // bump per release, checked here rather than left to drift.
+      expect(manifestPermissions.version).toBe(packageVersion());
     });
 
     test('should have valid OAuth client ID format', async ({ context }) => {
@@ -386,6 +400,137 @@ test.describe('Configuration Management', () => {
 
       expect(popupConfig.supabaseUrl).toBe(serviceWorkerConfig.supabaseUrl);
       expect(popupConfig.extensionName).toBe(serviceWorkerConfig.extensionName);
+    });
+  });
+
+  test.describe('Backend URL Resolution', () => {
+    test('should use the production backend when no override is stored', async ({ context }) => {
+      const [serviceWorker] = context.serviceWorkers();
+
+      const resolved = await serviceWorker.evaluate(async () => ({
+        storedOverride: await getBackendBaseUrlOverride(),
+        supabaseUrl: await resolveSupabaseUrl(),
+        processTextUrl: await resolveBackendUrl(CONFIG.EDGE_FUNCTIONS.PROCESS_TEXT),
+        configuredSupabaseUrl: CONFIG.SUPABASE_URL,
+        configuredProcessTextUrl: CONFIG.EDGE_FUNCTIONS.PROCESS_TEXT
+      }));
+
+      // Nothing stored: every real install resolves to the production project.
+      expect(resolved.storedOverride).toBeNull();
+      expect(resolved.supabaseUrl).toBe(resolved.configuredSupabaseUrl);
+      expect(resolved.processTextUrl).toBe(resolved.configuredProcessTextUrl);
+      expect(resolved.processTextUrl).toMatch(/^https:\/\/[a-z0-9]+\.supabase\.co\//);
+    });
+
+    test('should send the own-key path to OpenAI when no override is stored', async ({
+      context,
+    }) => {
+      const [serviceWorker] = context.serviceWorkers();
+
+      const resolved = await serviceWorker.evaluate(async () => ({
+        storedOverride: await getBackendBaseUrlOverride(),
+        openAiUrl: await resolveOpenAiUrl(),
+      }));
+
+      // The override reaches OpenAI as well as the backend, so this is the
+      // check that it stays inert for a real install: a user's own key must
+      // never post their Source anywhere but OpenAI.
+      expect(resolved.storedOverride).toBeNull();
+      expect(resolved.openAiUrl).toBe('https://api.openai.com/v1/chat/completions');
+    });
+
+    test('should ignore an override that is not a local address', async ({ context }) => {
+      const [serviceWorker] = context.serviceWorkers();
+
+      // The override moves the Supabase calls, the Edge Function calls and the
+      // own-key OpenAI call — the last carrying the user's raw key — so a
+      // value pointing anywhere but this machine is a way out for all three.
+      // Whatever put it in storage, it is ignored.
+      const resolved = await serviceWorker.evaluate(async () => {
+        const results = [];
+
+        for (const override of [
+          'https://evil.example.com',
+          'http://evil.example.com',
+          'https://127.0.0.1.evil.example.com',
+          'http://localhost.evil.example.com',
+          'not a url at all',
+          '//127.0.0.1:8080',
+        ]) {
+          await chrome.storage.local.set({ backend_base_url_override: override });
+          results.push({
+            override,
+            storedOverride: await getBackendBaseUrlOverride(),
+            supabaseUrl: await resolveSupabaseUrl(),
+            configuredSupabaseUrl: CONFIG.SUPABASE_URL,
+            processTextUrl: await resolveBackendUrl(CONFIG.EDGE_FUNCTIONS.PROCESS_TEXT),
+            openAiUrl: await resolveOpenAiUrl(),
+          });
+        }
+
+        await chrome.storage.local.remove('backend_base_url_override');
+        return results;
+      });
+
+      for (const result of resolved) {
+        expect(result.storedOverride, result.override).toBeNull();
+        expect(result.supabaseUrl, result.override).toBe(result.configuredSupabaseUrl);
+        expect(result.processTextUrl, result.override).toMatch(
+          /^https:\/\/[a-z0-9]+\.supabase\.co\//
+        );
+        expect(result.openAiUrl, result.override).toBe(
+          'https://api.openai.com/v1/chat/completions'
+        );
+      }
+    });
+
+    test('should honour a loopback override, which is all a test needs', async ({ context }) => {
+      const [serviceWorker] = context.serviceWorkers();
+
+      const resolved = await serviceWorker.evaluate(async () => {
+        const results = [];
+
+        for (const override of ['http://127.0.0.1:8123', 'http://localhost:8123/']) {
+          await chrome.storage.local.set({ backend_base_url_override: override });
+          results.push({
+            override,
+            storedOverride: await getBackendBaseUrlOverride(),
+            processTextUrl: await resolveBackendUrl(CONFIG.EDGE_FUNCTIONS.PROCESS_TEXT),
+            openAiUrl: await resolveOpenAiUrl(),
+          });
+        }
+
+        await chrome.storage.local.remove('backend_base_url_override');
+        return results;
+      });
+
+      expect(resolved[0].storedOverride).toBe('http://127.0.0.1:8123');
+      expect(resolved[0].processTextUrl).toBe('http://127.0.0.1:8123/functions/v1/process-text');
+      expect(resolved[0].openAiUrl).toBe('http://127.0.0.1:8123/v1/chat/completions');
+      expect(resolved[1].storedOverride).toBe('http://localhost:8123');
+    });
+  });
+
+  test.describe('Authentication start-up', () => {
+    test('starts auth once per worker, however many times it is asked', async ({ context }) => {
+      const [serviceWorker] = context.serviceWorkers();
+
+      // Two auth clients in one worker sign the user out from under each
+      // other: each restores the stored session and each clears it on the way
+      // out. Every wake-up, install and browser start means "make sure auth is
+      // ready", so they all have to land on the same client.
+      const sameClient = await serviceWorker.evaluate(async () => {
+        await initializeAuth();
+        const first = supabaseAuth;
+
+        await initializeAuth();
+        await initializeAuth();
+
+        return { same: supabaseAuth === first, built: Boolean(first) };
+      });
+
+      expect(sameClient.built).toBe(true);
+      expect(sameClient.same).toBe(true);
     });
   });
 });
