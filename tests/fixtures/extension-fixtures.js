@@ -283,6 +283,21 @@ async function menuItemExists(context, menuItemId) {
   }, menuItemId);
 }
 
+// The tab id Chrome knows a page by, which is what the service worker's
+// handlers are given. Asked the way those handlers ask — the active tab of the
+// last focused window — because the extension holds no `tabs` permission to
+// look a tab up by its URL with.
+async function tabIdFor(context, page) {
+  const [serviceWorker] = context.serviceWorkers();
+  await page.bringToFront();
+
+  return serviceWorker.evaluate(async () => {
+    const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+    if (!tab) throw new Error('Chrome reports no active tab');
+    return tab.id;
+  });
+}
+
 async function openPopup(context, extensionId) {
   const popupPage = await context.newPage();
   await popupPage.goto(`chrome-extension://${extensionId}/popup/popup.html`);
@@ -297,6 +312,7 @@ module.exports = {
   openPopup,
   clickMenuItem,
   menuItemExists,
+  tabIdFor,
   standInForCapture,
   capturesTaken,
   imageSize,

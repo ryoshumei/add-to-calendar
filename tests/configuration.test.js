@@ -438,6 +438,77 @@ test.describe('Configuration Management', () => {
       expect(resolved.storedOverride).toBeNull();
       expect(resolved.openAiUrl).toBe('https://api.openai.com/v1/chat/completions');
     });
+
+    test('should ignore an override that is not a local address', async ({ context }) => {
+      const [serviceWorker] = context.serviceWorkers();
+
+      // The override moves the Supabase calls, the Edge Function calls and the
+      // own-key OpenAI call — the last carrying the user's raw key — so a
+      // value pointing anywhere but this machine is a way out for all three.
+      // Whatever put it in storage, it is ignored.
+      const resolved = await serviceWorker.evaluate(async () => {
+        const results = [];
+
+        for (const override of [
+          'https://evil.example.com',
+          'http://evil.example.com',
+          'https://127.0.0.1.evil.example.com',
+          'http://localhost.evil.example.com',
+          'not a url at all',
+          '//127.0.0.1:8080',
+        ]) {
+          await chrome.storage.local.set({ backend_base_url_override: override });
+          results.push({
+            override,
+            storedOverride: await getBackendBaseUrlOverride(),
+            supabaseUrl: await resolveSupabaseUrl(),
+            configuredSupabaseUrl: CONFIG.SUPABASE_URL,
+            processTextUrl: await resolveBackendUrl(CONFIG.EDGE_FUNCTIONS.PROCESS_TEXT),
+            openAiUrl: await resolveOpenAiUrl(),
+          });
+        }
+
+        await chrome.storage.local.remove('backend_base_url_override');
+        return results;
+      });
+
+      for (const result of resolved) {
+        expect(result.storedOverride, result.override).toBeNull();
+        expect(result.supabaseUrl, result.override).toBe(result.configuredSupabaseUrl);
+        expect(result.processTextUrl, result.override).toMatch(
+          /^https:\/\/[a-z0-9]+\.supabase\.co\//
+        );
+        expect(result.openAiUrl, result.override).toBe(
+          'https://api.openai.com/v1/chat/completions'
+        );
+      }
+    });
+
+    test('should honour a loopback override, which is all a test needs', async ({ context }) => {
+      const [serviceWorker] = context.serviceWorkers();
+
+      const resolved = await serviceWorker.evaluate(async () => {
+        const results = [];
+
+        for (const override of ['http://127.0.0.1:8123', 'http://localhost:8123/']) {
+          await chrome.storage.local.set({ backend_base_url_override: override });
+          results.push({
+            override,
+            storedOverride: await getBackendBaseUrlOverride(),
+            processTextUrl: await resolveBackendUrl(CONFIG.EDGE_FUNCTIONS.PROCESS_TEXT),
+            openAiUrl: await resolveOpenAiUrl(),
+          });
+        }
+
+        await chrome.storage.local.remove('backend_base_url_override');
+        return results;
+      });
+
+      expect(resolved[0].storedOverride).toBe('http://127.0.0.1:8123');
+      expect(resolved[0].processTextUrl).toBe('http://127.0.0.1:8123/functions/v1/process-text');
+      expect(resolved[0].openAiUrl).toBe('http://127.0.0.1:8123/v1/chat/completions');
+      expect(resolved[1].storedOverride).toBe('http://localhost:8123');
+    });
   });
 
   test.describe('Authentication start-up', () => {

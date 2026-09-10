@@ -500,6 +500,23 @@ async function captureVisibleTab(tab) {
     return chrome.tabs.captureVisibleTab(tab.windowId, { format: 'png' });
 }
 
+// chrome.tabs.captureVisibleTab takes a window, not a tab: it photographs
+// whichever tab that window is showing. The Region belongs to the tab the user
+// drew it on, and everything between the drag and the capture — the runtime
+// hop, auth start-up, a storage read — is time for them to switch tabs. So the
+// tab is asked whether it is still the one in front; if it is not, nothing is
+// captured, because the Screenshot would be of a page they never pointed at.
+async function isStillInFront(tab) {
+    try {
+        const current = await chrome.tabs.get(tab.id);
+        return Boolean(current?.active) && current.windowId === tab.windowId;
+    } catch (error) {
+        // The tab has been closed since the Region was drawn.
+        console.error('Could not check whether the tab is still in front:', error);
+        return false;
+    }
+}
+
 // What a Screenshot can be extracted with: the user's own OpenAI key, or a
 // Google session that spends one of their monthly requests. With neither,
 // there is nothing to send a Screenshot to.
@@ -554,6 +571,12 @@ async function handleScreenshotCapture(tab, region = null, devicePixelRatio = 1)
         // the shared backend second. Having one of the two was settled before
         // the overlay opened, in startRegionCapture.
         const { apiKey } = await chrome.storage.sync.get('apiKey');
+
+        if (!(await isStillInFront(tab))) {
+            console.log('The tab the Region was drawn on is no longer in front');
+            await showExtractionError(tab.id, CANNOT_CAPTURE_MESSAGE);
+            return { success: false, error: CANNOT_CAPTURE_MESSAGE };
+        }
 
         let capture;
         try {

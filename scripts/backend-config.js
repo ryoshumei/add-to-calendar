@@ -14,11 +14,35 @@ const BACKEND_BASE_URL_OVERRIDE_KEY = 'backend_base_url_override';
 // backend in between.
 const OPENAI_CHAT_COMPLETIONS_URL = 'https://api.openai.com/v1/chat/completions';
 
+// The override moves every request the extension makes, the own-key path's
+// OpenAI call — which carries the user's raw key and their Source — included,
+// so only an address that cannot leave the machine is honoured. Anything else
+// stored under that key, however it got there, is ignored in favour of
+// production rather than trusted.
+const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]']);
+
+// The origin of a stored override worth using, or null for every other value:
+// a foreign host, https, a relative path, a typo, an object.
+function loopbackOrigin(stored) {
+    if (typeof stored !== 'string' || !stored.trim()) return null;
+
+    let url;
+    try {
+        url = new URL(stored.trim());
+    } catch (error) {
+        return null;
+    }
+
+    if (url.protocol !== 'http:') return null;
+    if (!LOOPBACK_HOSTS.has(url.hostname)) return null;
+
+    return url.origin;
+}
+
 async function getBackendBaseUrlOverride() {
     try {
         const stored = await chrome.storage.local.get(BACKEND_BASE_URL_OVERRIDE_KEY);
-        const override = stored?.[BACKEND_BASE_URL_OVERRIDE_KEY];
-        return typeof override === 'string' && override.trim() ? override.trim() : null;
+        return loopbackOrigin(stored?.[BACKEND_BASE_URL_OVERRIDE_KEY]);
     } catch (error) {
         console.warn('Could not read the backend base URL override:', error);
         return null;
@@ -35,7 +59,16 @@ async function resolveSupabaseUrl() {
 async function resolveBackendUrl(productionUrl) {
     const override = await getBackendBaseUrlOverride();
     if (!override) return productionUrl;
-    return new URL(new URL(productionUrl).pathname, override).toString();
+
+    try {
+        return new URL(new URL(productionUrl).pathname, override).toString();
+    } catch (error) {
+        // Whatever went wrong here, the production URL is the one thing that
+        // is always right: a throw would surface as a failed Extraction, or
+        // worse, as the Selection path's fabricated basic event.
+        console.warn('Could not apply the backend base URL override:', error);
+        return productionUrl;
+    }
 }
 
 // Endpoint the own-key path posts to: OpenAI, or — by the same rule, since
@@ -50,6 +83,7 @@ if (typeof module !== 'undefined' && module.exports) {
     module.exports = {
         BACKEND_BASE_URL_OVERRIDE_KEY,
         OPENAI_CHAT_COMPLETIONS_URL,
+        loopbackOrigin,
         getBackendBaseUrlOverride,
         resolveSupabaseUrl,
         resolveBackendUrl,

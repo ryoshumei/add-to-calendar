@@ -236,16 +236,16 @@ style.textContent = `
     color: #202124;
 }
 
-/* Thumbnail of the screenshot the events were read from */
+/* Frame around the thumbnail of the screenshot the events were read from.
+   The picture itself lives in a closed shadow root on this element, styled
+   from inside it, so nothing here can reach the image. */
 .screenshot-thumbnail {
     display: block;
-    width: 100%;
-    max-height: 150px;
-    object-fit: contain;
     margin: 0 0 12px 0;
     border: 1px solid #e0e0e0;
     border-radius: 6px;
     background-color: #f8f9fa;
+    overflow: hidden;
 }
 
 /* Multi-event modal styles */
@@ -763,11 +763,20 @@ function showStatusModal(message, detail = '') {
     modal.innerHTML = `
         <div class="status-modal">
             <div class="spinner"></div>
-            <div class="status-message">${message}</div>
-            ${detail ? `<div class="status-detail">${detail}</div>` : ''}
+            <div class="status-message"></div>
         </div>
     `;
-    
+
+    // Attached as text rather than built into the template: everything that
+    // reaches a modal on this page is treated as something to read.
+    modal.querySelector('.status-message').textContent = message;
+    if (detail) {
+        const statusDetail = document.createElement('div');
+        statusDetail.className = 'status-detail';
+        statusDetail.textContent = detail;
+        modal.querySelector('.status-modal').appendChild(statusDetail);
+    }
+
     document.body.appendChild(modal);
 }
 
@@ -840,7 +849,7 @@ function showAuthErrorModal(errorMessage = 'Authentication failed') {
     const modal = openReportingModal(`
         <div class="status-modal error">
             <h3>⚠️ Authentication Failed</h3>
-            <div class="error-message">${errorMessage}</div>
+            <div class="error-message"></div>
             <div class="relogin-instructions">
                 <strong>To fix this issue:</strong>
                 <ol>
@@ -857,6 +866,9 @@ function showAuthErrorModal(errorMessage = 'Authentication failed') {
             </div>
         </div>
     `);
+
+    // The message comes from the backend, so it is attached as text.
+    modal.querySelector('.error-message').textContent = errorMessage;
 
     const signInButton = modal.querySelector('.signin-button');
 
@@ -1005,6 +1017,89 @@ function showSetupRequiredModal() {
     });
 }
 
+// One Event's card. Everything on it — title, times, location, description —
+// is what a model read off the Source, so all of it is attached as text.
+function buildEventCard(event, index, formatDate) {
+    const card = document.createElement('div');
+    card.className = 'event-card';
+    card.dataset.index = String(index);
+
+    const header = document.createElement('div');
+    header.className = 'event-header';
+
+    const info = document.createElement('div');
+    info.className = 'event-info';
+
+    const title = document.createElement('h4');
+    title.className = 'event-title';
+    title.textContent = event.title ?? '';
+    info.appendChild(title);
+
+    const time = document.createElement('div');
+    time.className = 'event-time';
+    time.textContent = `\u{1F4C5} ${formatDate(event.startTime)} - ${formatDate(event.endTime)}`;
+    info.appendChild(time);
+
+    if (event.location) {
+        const location = document.createElement('div');
+        location.className = 'event-location';
+        location.textContent = `\u{1F4CD} ${event.location}`;
+        info.appendChild(location);
+    }
+
+    const addButton = document.createElement('button');
+    addButton.className = 'event-add-button';
+    addButton.dataset.url = createGoogleCalendarUrlForContent(event);
+    addButton.textContent = 'Add to Calendar';
+
+    header.appendChild(info);
+    header.appendChild(addButton);
+    card.appendChild(header);
+
+    if (event.description) {
+        const description = document.createElement('div');
+        description.className = 'event-description';
+        description.textContent = event.description;
+        card.appendChild(description);
+    }
+
+    return card;
+}
+
+// Show the user the Screenshot the Events were read from, without handing it
+// to the page it was taken of. A closed shadow root has no way in from the
+// outside — document.querySelector does not cross it, and the host's
+// shadowRoot is null — and attachShadow here is the isolated world's, so a
+// page cannot swap it for one it can open. Left in an attribute, the data URL
+// would be readable by any script on the page: for a Screenshot that is the
+// pixels of everything the tab was showing, cross-origin frames included.
+function attachScreenshotThumbnail(modal, screenshot) {
+    const host = document.createElement('div');
+    host.className = 'screenshot-thumbnail';
+
+    const shadow = host.attachShadow({ mode: 'closed' });
+
+    const style = document.createElement('style');
+    style.textContent = `
+        img {
+            display: block;
+            width: 100%;
+            max-height: 150px;
+            object-fit: contain;
+        }
+    `;
+
+    const thumbnail = document.createElement('img');
+    thumbnail.alt = 'The screenshot these events were read from';
+    thumbnail.src = screenshot;
+
+    shadow.appendChild(style);
+    shadow.appendChild(thumbnail);
+
+    const eventsList = modal.querySelector('.events-list');
+    eventsList.parentElement.insertBefore(host, eventsList);
+}
+
 // Display the confirmation modal for event creation (supports multiple events).
 // `screenshot` is the data URL of the Screenshot the Events were read from,
 // shown as a thumbnail; a Selection has none.
@@ -1029,32 +1124,10 @@ function showConfirmationModal(events, fallbackCalendarUrl, screenshot) {
         return date.toLocaleString();
     };
 
-    // Generate event cards HTML (empty state names the source it read)
+    // The empty state names the Source it read.
     const emptyMessage = screenshot
         ? 'No events were found in this screenshot.'
         : 'No events were found in the selected text.';
-    const eventsHtml = events.length === 0
-        ? `<div class="no-events-message">${emptyMessage}</div>`
-        : events.map((event, index) => {
-        const calendarUrl = createGoogleCalendarUrlForContent(event);
-        return `
-            <div class="event-card" data-index="${index}">
-                <div class="event-header">
-                    <div class="event-info">
-                        <h4 class="event-title">${event.title}</h4>
-                        <div class="event-time">
-                            📅 ${formatDate(event.startTime)} - ${formatDate(event.endTime)}
-                        </div>
-                        ${event.location ? `<div class="event-location">📍 ${event.location}</div>` : ''}
-                    </div>
-                    <button class="event-add-button" data-url="${calendarUrl}">
-                        Add to Calendar
-                    </button>
-                </div>
-                ${event.description ? `<div class="event-description">${event.description}</div>` : ''}
-            </div>
-        `;
-    }).join('');
 
     modal.innerHTML = `
         <div class="calendar-modal draggable" style="width: 500px;">
@@ -1069,9 +1142,7 @@ function showConfirmationModal(events, fallbackCalendarUrl, screenshot) {
                 </div>
                 <span class="events-count">${events.length} event${events.length !== 1 ? 's' : ''}</span>
             </div>
-            <div class="events-list">
-                ${eventsHtml}
-            </div>
+            <div class="events-list"></div>
             <a class="gc-ios-promo" href="https://apps.apple.com/app/id6772644308" target="_blank" rel="noopener" aria-label="Get Add to Calendar: AI Events on the App Store">
                 <span class="gc-ios-promo__icon" aria-hidden="true">
                     <svg viewBox="0 0 24 24" width="20" height="20" fill="none">
@@ -1097,16 +1168,23 @@ function showConfirmationModal(events, fallbackCalendarUrl, screenshot) {
         </div>
     `;
 
-    // The thumbnail is attached through the DOM, never interpolated into the
-    // template above: that template already carries model output.
-    if (screenshot) {
-        const thumbnail = document.createElement('img');
-        thumbnail.className = 'screenshot-thumbnail';
-        thumbnail.alt = 'The screenshot these events were read from';
-        thumbnail.src = screenshot;
+    // Every Event was read off the Source by a model, so the whole card is
+    // built through the DOM: a title of `<img src=x onerror=...>` is text the
+    // user reads, never markup this page runs.
+    const eventsList = modal.querySelector('.events-list');
+    if (events.length === 0) {
+        const empty = document.createElement('div');
+        empty.className = 'no-events-message';
+        empty.textContent = emptyMessage;
+        eventsList.appendChild(empty);
+    } else {
+        events.forEach((event, index) => {
+            eventsList.appendChild(buildEventCard(event, index, formatDate));
+        });
+    }
 
-        const eventsList = modal.querySelector('.events-list');
-        eventsList.parentElement.insertBefore(thumbnail, eventsList);
+    if (screenshot) {
+        attachScreenshotThumbnail(modal, screenshot);
     }
 
     document.body.appendChild(modal);
