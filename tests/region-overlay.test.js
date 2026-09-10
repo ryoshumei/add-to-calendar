@@ -305,6 +305,32 @@ test.describe('Region overlay', () => {
     expect(stubBackend.requestsTo(PROCESS_IMAGE_PATH, 'POST')).toHaveLength(1);
   });
 
+  test('a page that swallows input cannot stop the Region being drawn', async ({
+    context,
+    extensionId,
+    stubBackend,
+    sourcePage,
+    signedIn,
+  }) => {
+    await standInForCapture(context, sourcePage);
+    await triggerCapture(context, extensionId, sourcePage);
+    await expect(sourcePage.locator(OVERLAY)).toBeVisible();
+
+    // Plenty of pages stop events on their way down — a canvas app, an editor,
+    // a modal of the page's own. The two that start and shortcut a Region are
+    // exactly the ones that used to be reachable only after that descent.
+    await sourcePage.evaluate(() => {
+      window.addEventListener('mousedown', (event) => event.stopPropagation(), true);
+      window.addEventListener('mouseup', (event) => event.stopPropagation(), true);
+      window.addEventListener('dblclick', (event) => event.stopPropagation(), true);
+    });
+
+    await drawRegion(sourcePage, { x: 100, y: 120, width: 260, height: 160 });
+
+    await expect(sourcePage.locator('.calendar-modal-overlay .event-card')).toHaveCount(1);
+    expect(stubBackend.requestsTo(PROCESS_IMAGE_PATH, 'POST')).toHaveLength(1);
+  });
+
   test('nothing the extension drew is on the page when the tab is captured', async ({
     context,
     extensionId,
