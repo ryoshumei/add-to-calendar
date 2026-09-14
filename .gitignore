@@ -92,3 +92,6 @@ docs/agents/
 docs/adr/
 .claude/worktrees/
 .worktreeinclude
+
+# Local blog drafts, not part of the extension
+articles/
