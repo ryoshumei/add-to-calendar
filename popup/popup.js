@@ -316,8 +316,10 @@ function updateAuthUI() {
             }
         }
 
-        // Update usage stats for authenticated users
+        // The cached count first, so the bar is never blank, then what the
+        // backend says it actually is.
         updateUsageDisplay();
+        refreshUsageDisplay();
     } else {
         console.log('❌ User is not authenticated, showing login section');
 
@@ -368,6 +370,27 @@ function showMessage(text, type) {
     setTimeout(() => {
         messageDiv.style.display = 'none';
     }, 3000);
+}
+
+// Ask the service worker what the account has actually spent this month. The
+// stored count is only what the last Extraction in this browser reported, and
+// the same account extracts from the iOS app too, so an unopened popup's
+// number is stale by the time it is opened.
+//
+// Nobody asked for this, so nobody is told when it fails: the bar keeps the
+// count it is already showing rather than an error taking its place.
+async function refreshUsageDisplay() {
+    try {
+        const response = await chrome.runtime.sendMessage({ action: 'refreshUsage' });
+
+        if (response?.success) {
+            await updateUsageDisplay();
+        } else {
+            console.warn('Usage refresh failed:', response?.error);
+        }
+    } catch (error) {
+        console.warn('Usage refresh failed:', error);
+    }
 }
 
 // Update usage display

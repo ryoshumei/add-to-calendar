@@ -117,10 +117,12 @@ async function startStubBackend() {
     // Extraction is still in flight.
     responseDelayMs: 0,
     // Set either to { status, body } to make that endpoint fail instead of
-    // returning the canned Events.
+    // returning the canned Events; `usageResponse` does the same for the
+    // read-only usage endpoint.
     textResponse: null,
     imageResponse: null,
     openAiResponse: null,
+    usageResponse: null,
     // Raw model output for the OpenAI route. Left null, the canned Events are
     // serialised into it; set it to hand the key path the fenced JSON, single
     // object or empty content a real model sometimes returns.
@@ -191,6 +193,18 @@ async function startStubBackend() {
           return;
         }
         json(200, { eventDetails: { events: stub.events }, usage: stub.usage });
+        return;
+      }
+
+      // Read-only: what the account has spent this month, without spending
+      // anything. The popup asks it on open, so `stub.usage` is what the bar
+      // shows whether or not an Extraction has run in this browser.
+      if (url.pathname === '/functions/v1/get-usage') {
+        if (stub.usageResponse) {
+          json(stub.usageResponse.status, stub.usageResponse.body);
+          return;
+        }
+        json(200, { usage: stub.usage });
         return;
       }
 
