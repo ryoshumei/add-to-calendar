@@ -10,6 +10,12 @@ function packageVersion() {
   return JSON.parse(fs.readFileSync(packageFile, 'utf-8')).version;
 }
 
+// The public config file, read from disk: the place a second, hand-written
+// version number used to live.
+function publicConfigSource() {
+  return fs.readFileSync(path.resolve(__dirname, '..', 'config.js'), 'utf-8');
+}
+
 test.describe('Configuration Management', () => {
   test.describe('CONFIG Object Loading', () => {
     test('should load CONFIG in background script', async ({ context }) => {
@@ -53,7 +59,6 @@ test.describe('Configuration Management', () => {
 
       // Check extension settings
       expect(configStructure.extensionKeys).toContain('NAME');
-      expect(configStructure.extensionKeys).toContain('VERSION');
     });
 
     test('should have valid URLs in configuration', async ({ popupPage }) => {
@@ -208,6 +213,24 @@ test.describe('Configuration Management', () => {
       // the manifest's, and package.json says the same thing: one number to
       // bump per release, checked here rather than left to drift.
       expect(manifestPermissions.version).toBe(packageVersion());
+    });
+
+    // One release number, and it lives in the manifest. A copy in the public
+    // config is a second number free to disagree with it — it read 1.2.0 while
+    // the manifest said 1.3.0 — so the config carries none, and every caller
+    // asks chrome.runtime.getManifest() instead.
+    test('the public config carries no version of its own', async ({ popupPage, context }) => {
+      const [serviceWorker] = context.serviceWorkers();
+
+      const popupKeys = await popupPage.evaluate(() => Object.keys(CONFIG.EXTENSION));
+      const workerKeys = await serviceWorker.evaluate(() => Object.keys(CONFIG.EXTENSION));
+
+      expect(popupKeys).not.toContain('VERSION');
+      expect(workerKeys).not.toContain('VERSION');
+
+      // Not just that key: no version-shaped literal survives in the file, so a
+      // differently named copy cannot creep back in.
+      expect(publicConfigSource()).not.toMatch(/['"]\s*\d+(\.\d+)+\s*['"]/);
     });
 
     test('should have valid OAuth client ID format', async ({ context }) => {
