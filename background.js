@@ -62,11 +62,21 @@ async function startAuth() {
         // it is torn down on the way out, because a client nobody holds any
         // more still answers auth events, and its SIGNED_OUT would clear the
         // session the next client signs in with.
-        await auth?.teardown();
-        authStartUp = null;
-        supabaseAuth = null;
-        calendarService = null;
-        currentUser = null;
+        try {
+            await auth?.teardown();
+        } catch (teardownError) {
+            // Nothing is left to do about it, and a start-up that is already
+            // being swallowed must not come back out as a rejection: this one
+            // is nobody's to catch at three of the four call sites.
+            console.error('❌ Could not tear the half-built client down:', teardownError);
+        } finally {
+            // Whatever happened above, the failure is forgotten here, or it is
+            // the answer every later caller gets.
+            authStartUp = null;
+            supabaseAuth = null;
+            calendarService = null;
+            currentUser = null;
+        }
     }
 }
 
@@ -76,8 +86,13 @@ async function ensureAuthInitialized() {
     return supabaseAuth !== null;
 }
 
-// Initialize authentication immediately when service worker loads
-initializeAuth();
+// Initialize authentication immediately when service worker loads. Nobody
+// holds this promise, so it gets a backstop: start-up reports its own failures
+// and resolves regardless, and an unhandled rejection here would be logged
+// with no stack the worker can be read from.
+initializeAuth().catch(error => {
+    console.error('❌ Authentication start-up rejected:', error);
+});
 
 // The right-click item for a Screenshot is optional: a user who only ever
 // starts a capture from the popup can take it off the menu. Sync storage, next
@@ -906,6 +921,39 @@ async function backendResponseError(response) {
     return new Error(errorData.error || `Backend processing failed: ${response.status}`);
 }
 
+// One trip to an Edge Function. All three callers reach the backend the same
+// way — the session's token as the bearer, the extension's version on the
+// header the backend logs against it, and a failure turned into the user's
+// words by backendResponseError — so they reach it through here, and a change
+// to how this extension identifies itself is one change. What each caller does
+// with the answer is its own business and stays at the call site.
+//
+// A body means a POST carrying it as JSON; without one it is a GET.
+async function backendRequest(edgeFunction, accessToken, body) {
+    if (!accessToken) {
+        throw new Error('Authentication required. Please sign in with Google.');
+    }
+
+    const manifest = chrome.runtime.getManifest();
+    const endpoint = await resolveBackendUrl(edgeFunction);
+
+    const response = await fetch(endpoint, {
+        method: body === undefined ? 'GET' : 'POST',
+        headers: {
+            ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
+            'Authorization': `Bearer ${accessToken}`,
+            'X-Extension-Version': manifest.version,
+        },
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    });
+
+    if (!response.ok) {
+        throw await backendResponseError(response);
+    }
+
+    return response.json();
+}
+
 // Remember what the backend said this Extraction cost, so the popup's usage
 // bar shows it.
 async function storeUsageInfo(usage) {
@@ -921,26 +969,7 @@ async function storeUsageInfo(usage) {
 // account extracts from the iOS app too, so the number the user is shown comes
 // from here rather than from that cache.
 async function fetchUsageFromBackend(accessToken) {
-    if (!accessToken) {
-        throw new Error('Authentication required. Please sign in with Google.');
-    }
-
-    const manifest = chrome.runtime.getManifest();
-    const endpoint = await resolveBackendUrl(CONFIG.EDGE_FUNCTIONS.GET_USAGE);
-
-    const response = await fetch(endpoint, {
-        method: 'GET',
-        headers: {
-            'Authorization': `Bearer ${accessToken}`,
-            'X-Extension-Version': manifest.version,
-        }
-    });
-
-    if (!response.ok) {
-        throw await backendResponseError(response);
-    }
-
-    const data = await response.json();
+    const data = await backendRequest(CONFIG.EDGE_FUNCTIONS.GET_USAGE, accessToken);
 
     // A 200 that does not carry a count is no answer: stored, it would read as
     // nothing spent this month, and a wrong number on the bar is worse than
@@ -957,31 +986,14 @@ async function fetchUsageFromBackend(accessToken) {
 // Send a Screenshot to the backend for Extraction. Unlike the Selection path
 // there is no basic fallback: an Extraction that fails is reported as an error.
 async function processImageWithBackend(imageDataUrl, accessToken) {
-    if (!accessToken) {
-        throw new Error('Authentication required. Please sign in with Google.');
-    }
-
-    const manifest = chrome.runtime.getManifest();
-    const endpoint = await resolveBackendUrl(CONFIG.EDGE_FUNCTIONS.PROCESS_IMAGE);
-
-    const response = await fetch(endpoint, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${accessToken}`,
-            'X-Extension-Version': manifest.version,
-        },
-        // currentDateTime: the browser's local time (with timezone) so
-        // relative dates ("tomorrow") resolve against the user's clock,
-        // not the Edge Function's UTC clock.
-        body: JSON.stringify({ image: imageDataUrl, currentDateTime: new Date().toString() })
+    // currentDateTime: the browser's local time (with timezone) so relative
+    // dates ("tomorrow") resolve against the user's clock, not the Edge
+    // Function's UTC clock.
+    const data = await backendRequest(CONFIG.EDGE_FUNCTIONS.PROCESS_IMAGE, accessToken, {
+        image: imageDataUrl,
+        currentDateTime: new Date().toString()
     });
 
-    if (!response.ok) {
-        throw await backendResponseError(response);
-    }
-
-    const data = await response.json();
     await storeUsageInfo(data.usage);
 
     // A 200 whose body is not the shape the backend promises is a failed
@@ -995,37 +1007,18 @@ async function processImageWithBackend(imageDataUrl, accessToken) {
 async function processWithBackend(text, accessToken) {
     try {
         console.log('Calling backend service...');
-        
-        // Check if we have a valid access token
-        if (!accessToken) {
-            throw new Error('Authentication required. Please sign in with Google.');
-        }
-        
-        // Get extension version from manifest
-        const manifest = chrome.runtime.getManifest();
 
-        const endpoint = await resolveBackendUrl(CONFIG.EDGE_FUNCTIONS.PROCESS_TEXT);
-
-        const response = await fetch(endpoint, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${accessToken}`,
-                'X-Extension-Version': manifest.version,
-            },
-            // currentDateTime: the browser's local time (with timezone) so
-            // relative dates ("tomorrow") resolve against the user's clock,
-            // not the Edge Function's UTC clock.
-            body: JSON.stringify({ selectedText: text, currentDateTime: new Date().toString() })
+        // currentDateTime: the browser's local time (with timezone) so
+        // relative dates ("tomorrow") resolve against the user's clock,
+        // not the Edge Function's UTC clock.
+        //
+        // A 401 or a usage limit comes back from here in the same words as on
+        // the Screenshot path, and neither falls back to basic event creation.
+        const data = await backendRequest(CONFIG.EDGE_FUNCTIONS.PROCESS_TEXT, accessToken, {
+            selectedText: text,
+            currentDateTime: new Date().toString()
         });
 
-        // A 401 or a usage limit is reported in the same words as on the
-        // Screenshot path, and neither falls back to basic event creation.
-        if (!response.ok) {
-            throw await backendResponseError(response);
-        }
-
-        const data = await response.json();
         console.log('Backend processing successful:', data.eventDetails);
 
         await storeUsageInfo(data.usage);

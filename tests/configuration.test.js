@@ -228,9 +228,16 @@ test.describe('Configuration Management', () => {
       expect(popupKeys).not.toContain('VERSION');
       expect(workerKeys).not.toContain('VERSION');
 
-      // Not just that key: no version-shaped literal survives in the file, so a
-      // differently named copy cannot creep back in.
-      expect(publicConfigSource()).not.toMatch(/['"]\s*\d+(\.\d+)+\s*['"]/);
+      // Not just that key: a copy under a different name cannot creep back in
+      // either. Two narrow nets rather than one wide one — banning every
+      // quoted dotted number in the file would also ban a pinned dependency
+      // that has nothing to do with the release number.
+      //
+      // Nothing in here is named after a version...
+      expect(publicConfigSource()).not.toMatch(/version\s*:\s*['"]/i);
+      // ...and the number the manifest is currently on appears nowhere in it,
+      // whatever the copy would have been called.
+      expect(publicConfigSource()).not.toContain(packageVersion());
     });
 
     test('should have valid OAuth client ID format', async ({ context }) => {
@@ -642,6 +649,58 @@ test.describe('Configuration Management', () => {
       });
 
       expect(outcome.sessionSurvived).toBe(true);
+      expect(outcome.startsAgain).toBe(true);
+    });
+
+    test('a teardown that throws still leaves auth able to start again', async ({ context }) => {
+      const [serviceWorker] = context.serviceWorkers();
+
+      // Tearing the half-built client down is the last thing a failed
+      // start-up does, and it can fall over itself. If it does, the failure
+      // still has to be forgotten: a rejected start-up left in the memo is
+      // the one thing every later caller would get, for the rest of the
+      // worker's life, and it would surface as an unhandled rejection at the
+      // call that started it.
+      const outcome = await serviceWorker.evaluate(async () => {
+        await initializeAuth();
+
+        // Clear the way for a fresh start-up, the way a first run has it.
+        await supabaseAuth?.teardown();
+        authStartUp = null;
+        supabaseAuth = null;
+
+        const { restoreSession, teardown } = SupabaseAuth.prototype;
+        SupabaseAuth.prototype.restoreSession = function () {
+          throw new Error('start-up failed on purpose');
+        };
+        SupabaseAuth.prototype.teardown = async function () {
+          // The real work first, so this test leaves no listening client
+          // behind, and then the failure the start-up has to survive.
+          await teardown.call(this);
+          throw new Error('teardown failed on purpose');
+        };
+
+        let startUpRejected = false;
+        try {
+          await initializeAuth();
+        } catch (error) {
+          startUpRejected = true;
+        } finally {
+          SupabaseAuth.prototype.restoreSession = restoreSession;
+          SupabaseAuth.prototype.teardown = teardown;
+        }
+
+        const forgotten = authStartUp === null;
+
+        // The next caller gets a client that works, not that same failure.
+        const ready = await ensureAuthInitialized();
+
+        return { startUpRejected, forgotten, ready, startsAgain: supabaseAuth !== null };
+      });
+
+      expect(outcome.startUpRejected).toBe(false);
+      expect(outcome.forgotten).toBe(true);
+      expect(outcome.ready).toBe(true);
       expect(outcome.startsAgain).toBe(true);
     });
   });

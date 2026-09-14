@@ -317,9 +317,10 @@ function updateAuthUI() {
         }
 
         // The cached count first, so the bar is never blank, then what the
-        // backend says it actually is.
-        updateUsageDisplay();
-        refreshUsageDisplay();
+        // backend says it actually is — chained, because started side by side
+        // a slow storage read can land after the fresh number and put the
+        // stale one back on the bar. Neither call rejects.
+        updateUsageDisplay().then(refreshUsageDisplay);
     } else {
         console.log('❌ User is not authenticated, showing login section');
 

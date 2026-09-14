@@ -4,6 +4,7 @@
 // so it is exercised here in a page context, where a test can draw a known
 // image and measure what comes back.
 import { test, expect } from './fixtures/extension-fixtures.js';
+import fs from 'fs';
 import path from 'path';
 
 const PIPELINE_SCRIPT = path.resolve('scripts/screenshot-pipeline.js');
@@ -275,5 +276,43 @@ test.describe('Screenshot pipeline', () => {
     const result = await run({ capture, options: { maxEncodedBytes: cap } });
 
     expect(result.error).toMatch(/too large/i);
+  });
+});
+
+// The cap on what is sent is written down twice: the extension refuses to send
+// more than it, and the image endpoint refuses to accept more than it. Two
+// runtimes, so neither can import the other's number — the same standing
+// problem as the LLM prompt, guarded the same way (tests/llm-prompt-sync.test.js).
+// Drift either way is a bug a user sees: a lower client cap silently loses
+// Screenshots the backend would have taken, and a higher one spends a request
+// on a payload the backend throws out.
+test.describe('Encoded-size cap sync (client ↔ backend)', () => {
+  // The backend constant, read out of its own source rather than restated
+  // here: a copy in this file would be a third place to drift.
+  function backendCapBytes() {
+    const tsPath = path.resolve(
+      __dirname, '..', 'supabase', 'functions', '_shared', 'image-payload.ts'
+    );
+    const src = fs.readFileSync(tsPath, 'utf-8');
+
+    const declaration = src.match(
+      /export const MAX_IMAGE_DATA_URL_BYTES\s*=\s*([^;]+);/
+    );
+    expect(declaration, 'image-payload.ts no longer declares MAX_IMAGE_DATA_URL_BYTES')
+      .not.toBeNull();
+
+    return Number(new Function(`return (${declaration[1]});`)());
+  }
+
+  test('the extension and the image endpoint cap the payload at the same size', async ({
+    context,
+  }) => {
+    const [serviceWorker] = context.serviceWorkers();
+
+    const clientCap = await serviceWorker.evaluate(
+      () => SCREENSHOT_PIPELINE.MAX_ENCODED_BYTES
+    );
+
+    expect(clientCap).toBe(backendCapBytes());
   });
 });

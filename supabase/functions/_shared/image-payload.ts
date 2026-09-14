@@ -41,10 +41,12 @@ export function assertValidImagePayload(image: unknown): string {
   // Size before shape: one comparison, and it bounds the work the pattern
   // below is asked to do.
   if (image.length > MAX_IMAGE_DATA_URL_BYTES) {
+    // MiB, the unit the cap is counted in: calling 10 MiB "10 MB" would
+    // turn a client away that is inside the cap it is actually measured by.
     const cap = MAX_IMAGE_DATA_URL_BYTES / (1024 * 1024);
     throw new ApiError(
       400,
-      `The image is too large. Please send an image under ${cap} MB.`,
+      `The image is too large. Please send an image under ${cap} MiB.`,
     );
   }
 

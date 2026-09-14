@@ -72,6 +72,9 @@ Deno.test("an image over the byte cap is refused with a 400 a client can show", 
   assertEquals(error.status, 400);
   assertEquals(
     error.message,
-    "The image is too large. Please send an image under 10 MB.",
+    // MiB, because that is the unit the cap is actually counted in: a
+    // message naming a smaller number than the one enforced would send a
+    // client away that the endpoint would have accepted.
+    "The image is too large. Please send an image under 10 MiB.",
   );
 });

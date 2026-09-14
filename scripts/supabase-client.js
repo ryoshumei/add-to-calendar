@@ -100,10 +100,16 @@ class SupabaseAuth {
     // the one the client that replaced this one is signed in with. The token
     // refresh timer outlives it too, and a refresh is what fires that
     // SIGNED_OUT when the abandoned client's token can no longer be renewed.
-    // Both have to go before the client is let go of.
+    // Both have to go before the client is let go of — independently, so one
+    // of them failing does not leave the other in place.
     async teardown() {
-        this.authSubscription?.unsubscribe();
-        this.authSubscription = null;
+        try {
+            this.authSubscription?.unsubscribe();
+        } catch (error) {
+            console.error('❌ Could not remove the auth state listener:', error);
+        } finally {
+            this.authSubscription = null;
+        }
 
         try {
             await this.supabase?.auth?.stopAutoRefresh?.();
