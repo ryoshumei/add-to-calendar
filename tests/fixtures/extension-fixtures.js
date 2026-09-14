@@ -95,6 +95,11 @@ const test = base.extend({
       // seeded would throw the seeded session away.
       await initializeAuth();
 
+      // Nobody holds that start-up client once the worker starts again below,
+      // and it is aimed at production: torn down, its auth listener cannot
+      // clear the seeded session out from under the client that replaces it.
+      await supabaseAuth?.teardown();
+
       await chrome.storage.local.set({ supabase_session: session });
       authStartUp = null;
       supabaseAuth = null;

@@ -532,5 +532,94 @@ test.describe('Configuration Management', () => {
       expect(sameClient.built).toBe(true);
       expect(sameClient.same).toBe(true);
     });
+
+    test('a client that has been torn down leaves the stored session alone', async ({ context }) => {
+      const [serviceWorker] = context.serviceWorkers();
+
+      // An abandoned client keeps listening for auth state changes, and its
+      // SIGNED_OUT removes the session the surviving client is signed in
+      // with. Tearing a client down has to take its listener with it.
+      const cleared = await serviceWorker.evaluate(async () => {
+        const seedSession = () =>
+          chrome.storage.local.set({
+            supabase_session: { access_token: 'stub-token', user: { email: 'orphan@example.com' } },
+          });
+        const sessionIsGone = async () =>
+          !(await chrome.storage.local.get('supabase_session')).supabase_session;
+
+        const startClient = async () => {
+          const auth = new SupabaseAuth();
+          await auth.initialize();
+          return auth;
+        };
+
+        // A live client clears the session on SIGNED_OUT — that is the sign
+        // out the user asked for, and the reason an abandoned one is harmful.
+        const live = await startClient();
+        await seedSession();
+        await live.supabase.auth.signOut({ scope: 'local' });
+        const byLiveClient = await sessionIsGone();
+
+        // The same thing, torn down first, has to leave the session standing.
+        const abandoned = await startClient();
+        await abandoned.teardown();
+        await seedSession();
+        await abandoned.supabase.auth.signOut({ scope: 'local' });
+        const byTornDownClient = await sessionIsGone();
+
+        await live.teardown();
+        await chrome.storage.local.remove('supabase_session');
+        return { byLiveClient, byTornDownClient };
+      });
+
+      expect(cleared.byLiveClient).toBe(true);
+      expect(cleared.byTornDownClient).toBe(false);
+    });
+
+    test('a start-up that fails leaves no client behind to sign the user out', async ({ context }) => {
+      const [serviceWorker] = context.serviceWorkers();
+
+      // A start-up that falls over part way forgets itself, so the next
+      // caller can try again. The client it had half built has to go with it:
+      // it is already listening, and nobody holds it any more.
+      const outcome = await serviceWorker.evaluate(async () => {
+        await initializeAuth();
+
+        const restoreSession = SupabaseAuth.prototype.restoreSession;
+        let halfBuilt = null;
+        SupabaseAuth.prototype.restoreSession = function () {
+          // The listener is on by this point; start-up falls over here.
+          halfBuilt = this.supabase;
+          throw new Error('start-up failed on purpose');
+        };
+
+        try {
+          // Clear the way for a fresh start-up, the way a first run has it.
+          await supabaseAuth?.teardown();
+          authStartUp = null;
+          supabaseAuth = null;
+          await initializeAuth();
+        } finally {
+          SupabaseAuth.prototype.restoreSession = restoreSession;
+        }
+
+        await chrome.storage.local.set({
+          supabase_session: { access_token: 'stub-token', user: { email: 'orphan@example.com' } },
+        });
+        await halfBuilt.auth.signOut({ scope: 'local' });
+        const sessionSurvived = Boolean(
+          (await chrome.storage.local.get('supabase_session')).supabase_session
+        );
+
+        // Nothing stored to restore, so the next start-up asks nobody.
+        await chrome.storage.local.remove('supabase_session');
+        await initializeAuth();
+
+        return { sessionSurvived, startsAgain: supabaseAuth !== null };
+      });
+
+      expect(outcome.sessionSurvived).toBe(true);
+      expect(outcome.startsAgain).toBe(true);
+    });
   });
 });

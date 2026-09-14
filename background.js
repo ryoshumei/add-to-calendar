@@ -35,9 +35,10 @@ function initializeAuth() {
 }
 
 async function startAuth() {
+    let auth = null;
     try {
         console.log('🔄 Initializing authentication...');
-        const auth = new SupabaseAuth();
+        auth = new SupabaseAuth();
         await auth.initialize();
         supabaseAuth = auth;
         await auth.restoreSession();
@@ -57,7 +58,11 @@ async function startAuth() {
         // A failure is not remembered: the next caller starts auth again
         // rather than leaving the worker without it for the rest of its life.
         // The half-built client goes with it, so that caller builds one
-        // instead of inheriting a client that never finished starting.
+        // instead of inheriting a client that never finished starting — and
+        // it is torn down on the way out, because a client nobody holds any
+        // more still answers auth events, and its SIGNED_OUT would clear the
+        // session the next client signs in with.
+        await auth?.teardown();
         authStartUp = null;
         supabaseAuth = null;
         calendarService = null;
