@@ -8,6 +8,8 @@ const CONFIG = {
     EDGE_FUNCTIONS: {
         PROCESS_TEXT: 'https://pahcnlwgtghsctbnedhx.supabase.co/functions/v1/process-text',
         PROCESS_IMAGE: 'https://pahcnlwgtghsctbnedhx.supabase.co/functions/v1/process-image',
+        // Read-only: the account's usage this month, spending none of it.
+        GET_USAGE: 'https://pahcnlwgtghsctbnedhx.supabase.co/functions/v1/get-usage',
         CREATE_CALENDAR_EVENT: 'https://pahcnlwgtghsctbnedhx.supabase.co/functions/v1/create-calendar-event'
     },
 

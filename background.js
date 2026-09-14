@@ -271,6 +271,28 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             });
 
         return true; // Keep the message channel open for async response
+    } else if (request.action === 'refreshUsage') {
+        // The popup asking what the account has spent this month. The worker
+        // holds the session, and it is the one writer of `usage_info`, so the
+        // read happens here rather than in the popup.
+        console.log('📊 Popup requesting current usage');
+
+        ensureAuthInitialized()
+            .then(() => {
+                if (!supabaseAuth?.isAuthenticated()) {
+                    throw new Error('Authentication required. Please sign in with Google.');
+                }
+                return fetchUsageFromBackend(supabaseAuth.getAccessToken());
+            })
+            .then(usage => sendResponse({ success: true, usage }))
+            .catch(error => {
+                // Nothing the user asked for failed here, so this is logged
+                // and not shown: the popup keeps the number it already had.
+                console.warn('Could not refresh usage:', error);
+                sendResponse({ success: false, error: error.message });
+            });
+
+        return true; // Keep channel open for async response
     } else if (request.action === 'captureScreenshot') {
         // Screenshot trigger from the popup. The popup is not a tab, so the
         // active tab of the last focused window is the page the user is
@@ -886,6 +908,45 @@ async function storeUsageInfo(usage) {
 
     console.log(`Usage: ${usage.usageCount}/${usage.limit} for ${usage.yearMonth}`);
     await chrome.storage.local.set({ usage_info: usage });
+}
+
+// Ask the backend what the account has spent this month. Read-only: it spends
+// nothing, which is what lets the popup ask on open. The stored usage is only
+// ever what the last Extraction *in this browser* reported, and the same
+// account extracts from the iOS app too, so the number the user is shown comes
+// from here rather than from that cache.
+async function fetchUsageFromBackend(accessToken) {
+    if (!accessToken) {
+        throw new Error('Authentication required. Please sign in with Google.');
+    }
+
+    const manifest = chrome.runtime.getManifest();
+    const endpoint = await resolveBackendUrl(CONFIG.EDGE_FUNCTIONS.GET_USAGE);
+
+    const response = await fetch(endpoint, {
+        method: 'GET',
+        headers: {
+            'Authorization': `Bearer ${accessToken}`,
+            'X-Extension-Version': manifest.version,
+        }
+    });
+
+    if (!response.ok) {
+        throw await backendResponseError(response);
+    }
+
+    const data = await response.json();
+
+    // A 200 that does not carry a count is no answer: stored, it would read as
+    // nothing spent this month, and a wrong number on the bar is worse than
+    // the one the user last saw.
+    if (typeof data?.usage?.usageCount !== 'number') {
+        throw new Error('The backend returned no usage.');
+    }
+
+    await storeUsageInfo(data.usage);
+
+    return data.usage;
 }
 
 // Send a Screenshot to the backend for Extraction. Unlike the Selection path
