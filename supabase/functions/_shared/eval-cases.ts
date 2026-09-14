@@ -26,6 +26,23 @@ export interface EvalExpectation {
     interval?: number;
     daysOfWeek?: string[];
   } | null;
+  /**
+   * Per-event expectations, checked against events[i] by index. minEvents on
+   * its own says how many Events came back and nothing about what is in them
+   * past the first, which for a Source holding several — a timetable, a
+   * programme — is most of what the case is about.
+   */
+  events?: EventExpectation[];
+}
+
+/** What one Event, at a known position, has to say. */
+export interface EventExpectation {
+  /** exact startTime, YYYY-MM-DDTHH:mm:ss */
+  startTime?: string;
+  /** date part of startTime, YYYY-MM-DD */
+  startDate?: string;
+  /** title must contain AT LEAST ONE of these, case-insensitive */
+  titleIncludes?: string[];
 }
 
 export interface EvalCase {
@@ -58,34 +75,26 @@ export function assertEventsMatch(
     );
   }
 
-  // Field checks apply to the first event; skip when none exist (count
-  // failures above already cover the unexpected-empty case).
+  // Events named by position are checked wherever they were asked for, and
+  // one that never came back is a failure of its own rather than a check that
+  // quietly did not run.
+  if (expect.events) {
+    expect.events.forEach((expected, index) => {
+      const event = events[index];
+      if (!event) {
+        failures.push(`event ${index + 1}: missing`);
+        return;
+      }
+      failures.push(...checkEvent(event, expected, `event ${index + 1}`));
+    });
+  }
+
+  // The rest of the field checks apply to the first event; skip when none
+  // exist (count failures above already cover the unexpected-empty case).
   const first = events[0];
   if (!first) return failures;
 
-  if (expect.startTime && first.startTime !== expect.startTime) {
-    failures.push(
-      `startTime mismatch: expected ${expect.startTime}, got ${first.startTime}`,
-    );
-  }
-  if (expect.startDate && !first.startTime?.startsWith(expect.startDate)) {
-    failures.push(
-      `startDate mismatch: expected ${expect.startDate}, got ${first.startTime}`,
-    );
-  }
-  if (expect.titleIncludes && expect.titleIncludes.length > 0) {
-    const title = (first.title ?? "").toLowerCase();
-    const hit = expect.titleIncludes.some((s) =>
-      title.includes(s.toLowerCase())
-    );
-    if (!hit) {
-      failures.push(
-        `title "${first.title}" contains none of: ${
-          expect.titleIncludes.join(", ")
-        }`,
-      );
-    }
-  }
+  failures.push(...checkEvent(first, expect, "first event"));
 
   if (expect.recurrence !== undefined) {
     if (expect.recurrence === null) {
@@ -125,6 +134,41 @@ export function assertEventsMatch(
           );
         }
       }
+    }
+  }
+
+  return failures;
+}
+
+/** The checks one Event answers, wherever in the list it sits. */
+function checkEvent(
+  event: EventDetails,
+  expect: EventExpectation,
+  label: string,
+): string[] {
+  const failures: string[] = [];
+
+  if (expect.startTime && event.startTime !== expect.startTime) {
+    failures.push(
+      `${label}: startTime mismatch: expected ${expect.startTime}, got ${event.startTime}`,
+    );
+  }
+  if (expect.startDate && !event.startTime?.startsWith(expect.startDate)) {
+    failures.push(
+      `${label}: startDate mismatch: expected ${expect.startDate}, got ${event.startTime}`,
+    );
+  }
+  if (expect.titleIncludes && expect.titleIncludes.length > 0) {
+    const title = (event.title ?? "").toLowerCase();
+    const hit = expect.titleIncludes.some((s) =>
+      title.includes(s.toLowerCase())
+    );
+    if (!hit) {
+      failures.push(
+        `${label}: title "${event.title}" contains none of: ${
+          expect.titleIncludes.join(", ")
+        }`,
+      );
     }
   }
 

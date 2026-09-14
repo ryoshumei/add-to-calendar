@@ -7,13 +7,17 @@ const CONFIG = {
     // Edge Functions (backend service endpoints)
     EDGE_FUNCTIONS: {
         PROCESS_TEXT: 'https://pahcnlwgtghsctbnedhx.supabase.co/functions/v1/process-text',
+        PROCESS_IMAGE: 'https://pahcnlwgtghsctbnedhx.supabase.co/functions/v1/process-image',
+        // Read-only: the account's usage this month, spending none of it.
+        GET_USAGE: 'https://pahcnlwgtghsctbnedhx.supabase.co/functions/v1/get-usage',
         CREATE_CALENDAR_EVENT: 'https://pahcnlwgtghsctbnedhx.supabase.co/functions/v1/create-calendar-event'
     },
 
-    // Extension settings
+    // Extension settings. The version is not here: it is the manifest's, read
+    // with chrome.runtime.getManifest().version, so a release has one number to
+    // bump and a copy cannot fall behind it.
     EXTENSION: {
-        NAME: 'Calendar Event Creator',
-        VERSION: '1.2.0'
+        NAME: 'Calendar Event Creator'
     }
 };
 

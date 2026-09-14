@@ -7,6 +7,7 @@ import { LLM_CONFIG } from '../_shared/llm-prompt.ts'
 import { checkAndIncrementUsage, refundUsage } from '../_shared/usage-tracking.ts'
 import type { UsageInfo, UsageTrackingClient } from '../_shared/usage-tracking.ts'
 import { ApiError, mapOpenAIError } from '../_shared/api-error.ts'
+import { assertValidImagePayload } from '../_shared/image-payload.ts'
 import { parseEventResponse } from '../_shared/parse-event-response.ts'
 import type { EventResponse } from '../_shared/parse-event-response.ts'
 import { resolveCurrentDateTime } from '../_shared/client-datetime.ts'
@@ -58,6 +59,15 @@ serve(async (req) => {
       throw new Error(`Client version ${extensionVersion} is no longer supported. Please update to the latest version.`)
     }
 
+    // Get request body. currentDateTime is the CLIENT's local time string —
+    // relative dates ("tomorrow") must resolve in the user's timezone, not
+    // this server's (UTC). Optional: old clients don't send it.
+    //
+    // The image is checked here, before the usage charge below: a payload
+    // this endpoint will not process costs the user nothing.
+    const { image, currentDateTime } = await req.json()
+    const imageDataUrl = assertValidImagePayload(image)
+
     // Check and increment usage - must be done before processing
     const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
     if (!serviceRoleKey) {
@@ -81,14 +91,6 @@ serve(async (req) => {
     chargedUsage = usageInfo
     chargedUserId = user.id
 
-    // Get request body. currentDateTime is the CLIENT's local time string —
-    // relative dates ("tomorrow") must resolve in the user's timezone, not
-    // this server's (UTC). Optional: old clients don't send it.
-    const { image, currentDateTime } = await req.json()
-    if (!image || typeof image !== 'string') {
-      throw new Error('image is required')
-    }
-
     // Get OpenAI API key from environment
     const openaiApiKey = Deno.env.get('OPENAI_API_KEY')
     if (!openaiApiKey) {
@@ -97,7 +99,7 @@ serve(async (req) => {
 
     // Process with OpenAI vision
     const eventDetails = await processImageWithOpenAI(
-      image,
+      imageDataUrl,
       openaiApiKey,
       resolveCurrentDateTime(currentDateTime)
     )

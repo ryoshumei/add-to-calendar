@@ -82,6 +82,48 @@ Deno.test("titleIncludes passes when ANY substring matches, case-insensitive", (
   assertEquals(bad[0].includes("title"), true);
 });
 
+Deno.test("checks events named by position, not just the first", () => {
+  const sessions = [
+    event({ title: "Opening keynote", startTime: "2026-07-24T09:30:00" }),
+    event({ title: "Ship smaller", startTime: "2026-07-24T11:00:00" }),
+    event({ title: "Closing panel", startTime: "2026-07-24T15:00:00" }),
+  ];
+
+  const ok = assertEventsMatch(sessions, {
+    minEvents: 3,
+    maxEvents: 3,
+    events: [
+      { titleIncludes: ["keynote"], startTime: "2026-07-24T09:30:00" },
+      { titleIncludes: ["ship smaller"], startTime: "2026-07-24T11:00:00" },
+      { titleIncludes: ["panel"], startTime: "2026-07-24T15:00:00" },
+    ],
+  });
+  assertEquals(ok, []);
+
+  // The failure the first-event-only matcher could not see: three Events came
+  // back, and the second and third are not the sessions that were asked for.
+  const bad = assertEventsMatch(sessions, {
+    minEvents: 3,
+    maxEvents: 3,
+    events: [
+      { titleIncludes: ["keynote"] },
+      { titleIncludes: ["workshop"] },
+      { startTime: "2026-07-24T16:00:00" },
+    ],
+  });
+  assertEquals(bad.length, 2);
+  assertEquals(bad[0].includes("event 2"), true);
+  assertEquals(bad[1].includes("event 3"), true);
+});
+
+Deno.test("names an event that never came back", () => {
+  const failures = assertEventsMatch([event()], {
+    minEvents: 1,
+    events: [{ titleIncludes: ["meeting"] }, { titleIncludes: ["dentist"] }],
+  });
+  assertEquals(failures, ["event 2: missing"]);
+});
+
 Deno.test("skips field checks when no events and minEvents is zero", () => {
   const failures = assertEventsMatch([], {
     minEvents: 0,

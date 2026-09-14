@@ -15,6 +15,8 @@ class SupabaseAuth {
         this.supabase = null; // Will be initialized when library is loaded
         this.currentUser = null;
         this.session = null;
+        // Held so the listener can be taken off again: see teardown().
+        this.authSubscription = null;
     }
 
     // Initialize the client after library loads
@@ -27,7 +29,9 @@ class SupabaseAuth {
 
         if (createClientFunc && typeof CONFIG !== 'undefined') {
             console.log('✅ Creating Supabase client...');
-            this.supabase = createClientFunc(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_ANON_KEY, {
+            // Production URL unless a test has stored a backend override.
+            const supabaseUrl = await resolveSupabaseUrl();
+            this.supabase = createClientFunc(supabaseUrl, CONFIG.SUPABASE_ANON_KEY, {
                 auth: {
                     autoRefreshToken: true,   // Automatically refresh tokens before they expire
                     persistSession: false,     // We handle persistence manually via Chrome storage
@@ -57,7 +61,7 @@ class SupabaseAuth {
 
         console.log('🔵 Setting up auth state change listener...');
         
-        this.supabase.auth.onAuthStateChange(async (event, session) => {
+        const { data } = this.supabase.auth.onAuthStateChange(async (event, session) => {
             console.log('🔔 Auth state changed:', event, {
                 hasSession: !!session,
                 userEmail: session?.user?.email
@@ -84,7 +88,36 @@ class SupabaseAuth {
             // Ignore INITIAL_SESSION and other events - let restoreSession handle initial state
         });
 
+        this.authSubscription = data?.subscription || null;
+
         console.log('✅ Auth state change listener setup complete');
+    }
+
+    // Stop a client that is being dropped.
+    //
+    // The listener above outlives the reference to the client: it goes on
+    // answering auth events, and its SIGNED_OUT removes the stored session —
+    // the one the client that replaced this one is signed in with. The token
+    // refresh timer outlives it too, and a refresh is what fires that
+    // SIGNED_OUT when the abandoned client's token can no longer be renewed.
+    // Both have to go before the client is let go of — independently, so one
+    // of them failing does not leave the other in place.
+    async teardown() {
+        try {
+            this.authSubscription?.unsubscribe();
+        } catch (error) {
+            console.error('❌ Could not remove the auth state listener:', error);
+        } finally {
+            this.authSubscription = null;
+        }
+
+        try {
+            await this.supabase?.auth?.stopAutoRefresh?.();
+        } catch (error) {
+            console.error('❌ Could not stop the token refresh timer:', error);
+        }
+
+        console.log('✅ Auth client torn down');
     }
 
     // Get current session

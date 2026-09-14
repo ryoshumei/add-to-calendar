@@ -236,6 +236,18 @@ style.textContent = `
     color: #202124;
 }
 
+/* Frame around the thumbnail of the screenshot the events were read from.
+   The picture itself lives in a closed shadow root on this element, styled
+   from inside it, so nothing here can reach the image. */
+.screenshot-thumbnail {
+    display: block;
+    margin: 0 0 12px 0;
+    border: 1px solid #e0e0e0;
+    border-radius: 6px;
+    background-color: #f8f9fa;
+    overflow: hidden;
+}
+
 /* Multi-event modal styles */
 .events-list {
     max-height: 400px;
@@ -399,6 +411,51 @@ style.textContent = `
     opacity: 0.9;
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
 }
+
+/* Region overlay: the layer the user drags a Region on */
+.calendar-region-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: rgba(15, 23, 42, 0.32);
+    cursor: crosshair;
+    user-select: none;
+    outline: none;
+    z-index: 2147483647;
+}
+
+/* While a Region is being drawn the page shows through, and the shadow around
+   the rectangle dims everything the Screenshot will leave out. */
+.calendar-region-overlay.drawing {
+    background-color: transparent;
+}
+
+.calendar-region-overlay .region-rect {
+    position: fixed;
+    border: 1px solid #ffffff;
+    outline: 1px solid rgba(66, 133, 244, 0.9);
+    box-sizing: border-box;
+    box-shadow: 0 0 0 100vmax rgba(15, 23, 42, 0.32);
+    pointer-events: none;
+}
+
+.calendar-region-overlay .region-hint {
+    position: fixed;
+    top: 24px;
+    left: 50%;
+    transform: translateX(-50%);
+    padding: 8px 16px;
+    border-radius: 999px;
+    background-color: rgba(32, 33, 36, 0.92);
+    color: #ffffff;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    font-size: 13px;
+    line-height: 1.4;
+    white-space: nowrap;
+    pointer-events: none;
+}
 `;
 document.head.appendChild(style);
 
@@ -486,7 +543,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             return;
         }
 
-        showConfirmationModal(events, message.calendarUrl);
+        showConfirmationModal(events, message.calendarUrl, message.screenshot);
     } else if (message.type === "ERROR") {
         showError(message.message);
     } else if (message.type === "SHOW_STATUS") {
@@ -499,8 +556,254 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         showAuthErrorModal(message.message);
     } else if (message.type === "SHOW_SETUP_REQUIRED") {
         showSetupRequiredModal();
+    } else if (message.type === "SHOW_EXTRACTION_ERROR") {
+        showExtractionErrorModal(message.message);
+    } else if (message.type === "SHOW_REGION_OVERLAY") {
+        showRegionOverlay();
     }
 });
+
+// ---------------------------------------------------------------------------
+// Region overlay
+//
+// A Screenshot is the visible tab cut down to the Region the user drags. This
+// overlay is what they drag on; the service worker does the capturing, so all
+// the overlay reports is the rectangle and the display's device pixel ratio.
+
+const REGION_OVERLAY_ID = 'calendar-region-overlay';
+
+// A drag shorter than this in either direction is a mis-click, not a Region:
+// it is dismissed rather than sent, so a slip costs nothing.
+const MIN_REGION_PX = 10;
+
+// How long a mis-click waits before it dismisses the overlay. Each half of a
+// double-click is a mis-click on its own, so dismissing one straight away
+// would take the overlay away before the double-click that sends the whole
+// visible tab could arrive. Chrome counts two clicks up to about 500 ms apart
+// as a double-click, so a shorter wait than that loses the slow ones.
+const MISCLICK_DISMISS_MS = 500;
+
+// The layer currently on the page, with the listeners that tear it down.
+let regionOverlay = null;
+
+function showRegionOverlay() {
+    hideRegionOverlay();
+
+    const overlay = document.createElement('div');
+    overlay.id = REGION_OVERLAY_ID;
+    overlay.className = 'calendar-region-overlay';
+    // Focusable so the keys that close it arrive here rather than at whatever
+    // the page had focused.
+    overlay.tabIndex = -1;
+
+    const hint = document.createElement('div');
+    hint.className = 'region-hint';
+    hint.textContent = 'Drag to choose a Region  ·  Enter for the whole tab  ·  Esc to cancel';
+
+    const rect = document.createElement('div');
+    rect.className = 'region-rect';
+    rect.style.display = 'none';
+
+    overlay.appendChild(hint);
+    overlay.appendChild(rect);
+    (document.body || document.documentElement).appendChild(overlay);
+    overlay.focus({ preventScroll: true });
+
+    const state = { overlay, rect, start: null, dismissTimer: null };
+
+    const onMouseDown = (event) => {
+        if (event.button !== 0) return;
+        // Otherwise the press starts a text selection on the page under the
+        // overlay instead of a Region.
+        event.preventDefault();
+        cancelPendingDismissal(state);
+        state.start = { x: event.clientX, y: event.clientY };
+        overlay.classList.add('drawing');
+        drawRegionRect(state, state.start);
+    };
+
+    // On the window rather than the overlay, so a drag that runs off the edge
+    // of the window still moves the rectangle.
+    const onMouseMove = (event) => {
+        if (!state.start) return;
+        drawRegionRect(state, { x: event.clientX, y: event.clientY });
+    };
+
+    // Releasing the mouse is the whole confirmation: the Region goes off for
+    // Extraction as it is.
+    const onMouseUp = (event) => {
+        if (!state.start) return;
+        const region = toRegion(state.start, { x: event.clientX, y: event.clientY });
+        state.start = null;
+
+        if (region.width < MIN_REGION_PX || region.height < MIN_REGION_PX) {
+            state.dismissTimer = setTimeout(hideRegionOverlay, MISCLICK_DISMISS_MS);
+            return;
+        }
+
+        sendRegion(region);
+    };
+
+    // The whole visible tab is a Region too, for a page that needs no drawing.
+    const onDoubleClick = () => {
+        cancelPendingDismissal(state);
+        sendRegion(null);
+    };
+
+    const onKeyDown = (event) => {
+        if (event.key === 'Escape') {
+            event.preventDefault();
+            hideRegionOverlay();
+        } else if (event.key === 'Enter') {
+            event.preventDefault();
+            sendRegion(null);
+        }
+    };
+
+    // Only the user draws a Region. An event a page script dispatched is not
+    // the user: a synthetic Enter or double-click would send the visible tab
+    // and spend one of their monthly requests on a Screenshot they never
+    // asked for, so every handler here takes real input only.
+    //
+    // And only an overlay that is still on the page draws anything. A page is
+    // free to tear its own DOM down, overlay and all; these listeners are on
+    // the window and would outlive it, so the next real event is where that is
+    // noticed — before a stray Enter sends the whole visible tab.
+    const fromTheUser = (handler) => (event) => {
+        if (!overlay.isConnected) {
+            hideRegionOverlay();
+            return;
+        }
+        if (event.isTrusted) handler(event);
+    };
+
+    const mouseDown = fromTheUser(onMouseDown);
+    const doubleClick = fromTheUser(onDoubleClick);
+    const mouseMove = fromTheUser(onMouseMove);
+    const mouseUp = fromTheUser(onMouseUp);
+    const keyDown = fromTheUser(onKeyDown);
+
+    // All five on the window in the capture phase: bound on the overlay in the
+    // bubble phase, the two that start and shortcut a Region are exactly the
+    // ones a page could swallow before they ever arrived.
+    window.addEventListener('mousedown', mouseDown, true);
+    window.addEventListener('dblclick', doubleClick, true);
+    window.addEventListener('mousemove', mouseMove, true);
+    window.addEventListener('mouseup', mouseUp, true);
+    window.addEventListener('keydown', keyDown, true);
+    state.removeListeners = () => {
+        window.removeEventListener('mousedown', mouseDown, true);
+        window.removeEventListener('dblclick', doubleClick, true);
+        window.removeEventListener('mousemove', mouseMove, true);
+        window.removeEventListener('mouseup', mouseUp, true);
+        window.removeEventListener('keydown', keyDown, true);
+    };
+
+    regionOverlay = state;
+}
+
+// Takes the overlay off the page. Safe to call when there is none.
+function hideRegionOverlay() {
+    if (!regionOverlay) return;
+
+    cancelPendingDismissal(regionOverlay);
+    regionOverlay.removeListeners();
+    regionOverlay.overlay.remove();
+    regionOverlay = null;
+}
+
+function cancelPendingDismissal(state) {
+    if (!state.dismissTimer) return;
+
+    clearTimeout(state.dismissTimer);
+    state.dismissTimer = null;
+}
+
+function drawRegionRect(state, corner) {
+    const region = toRegion(state.start, corner);
+
+    state.rect.style.display = 'block';
+    state.rect.style.left = `${region.x}px`;
+    state.rect.style.top = `${region.y}px`;
+    state.rect.style.width = `${region.width}px`;
+    state.rect.style.height = `${region.height}px`;
+}
+
+// The rectangle between the two corners of the drag, whichever way round it
+// was dragged, in CSS pixels from the top left of the viewport.
+function toRegion(from, to) {
+    return {
+        x: Math.min(from.x, to.x),
+        y: Math.min(from.y, to.y),
+        width: Math.abs(to.x - from.x),
+        height: Math.abs(to.y - from.y)
+    };
+}
+
+// How long the capture waits for the frame that no longer has the overlay in
+// it before going ahead anyway. requestAnimationFrame does not run at all
+// while the tab is hidden — a minimised or occluded window — and a Screenshot
+// that never happens is worse than one taken a frame early.
+const PAINT_WAIT_MS = 100;
+
+// Hand the Region to the service worker, which captures the tab and runs the
+// Extraction on it. Anything the extension drew — this overlay, a modal left
+// over from an earlier Extraction — goes out of sight first, and the capture
+// waits for the frame that paints its absence, so none of it is in the
+// Screenshot.
+async function sendRegion(region) {
+    // What the page measures itself in, so the Region can be placed on a
+    // capture taken at whatever size Chrome takes it at.
+    const metrics = {
+        viewportWidth: window.innerWidth,
+        viewportHeight: window.innerHeight,
+        devicePixelRatio: window.devicePixelRatio
+    };
+
+    hideRegionOverlay();
+    const showModalsAgain = hideModalsForCapture();
+    await afterNextPaint();
+
+    try {
+        const result = await chrome.runtime.sendMessage({
+            action: 'regionDrawn',
+            region,
+            metrics
+        });
+
+        // A Screenshot that did not happen — a busy tab, a page Chrome will
+        // not capture — leaves the user with whatever they were already
+        // looking at, rather than taking it away for nothing. A successful one
+        // replaces it with the Events that were just read.
+        if (!result || result.success !== true) {
+            showModalsAgain();
+        }
+    } catch (error) {
+        console.error('Could not send the Region for Extraction:', error);
+        showModalsAgain();
+    }
+}
+
+// Take everything the extension has on the page out of the picture, without
+// throwing it away: a confirmation the user has not acted on holds the Events
+// of an Extraction they have already been charged for. Hands back the way to
+// put it in front of them again.
+function hideModalsForCapture() {
+    const modals = [...document.querySelectorAll('.calendar-modal-overlay')];
+    modals.forEach(modal => { modal.style.display = 'none'; });
+
+    return () => modals.forEach(modal => { modal.style.display = ''; });
+}
+
+// requestAnimationFrame runs just before the next paint, so it takes a second
+// one to be back after the frame that no longer has the overlay in it — and a
+// timeout beside it, because a hidden tab paints no frames at all.
+function afterNextPaint() {
+    return Promise.race([
+        new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+        new Promise(resolve => setTimeout(resolve, PAINT_WAIT_MS))
+    ]);
+}
 
 // Display a status/loading modal
 function showStatusModal(message, detail = '') {
@@ -514,11 +817,20 @@ function showStatusModal(message, detail = '') {
     modal.innerHTML = `
         <div class="status-modal">
             <div class="spinner"></div>
-            <div class="status-message">${message}</div>
-            ${detail ? `<div class="status-detail">${detail}</div>` : ''}
+            <div class="status-message"></div>
         </div>
     `;
-    
+
+    // Attached as text rather than built into the template: everything that
+    // reaches a modal on this page is treated as something to read.
+    modal.querySelector('.status-message').textContent = message;
+    if (detail) {
+        const statusDetail = document.createElement('div');
+        statusDetail.className = 'status-detail';
+        statusDetail.textContent = detail;
+        modal.querySelector('.status-modal').appendChild(statusDetail);
+    }
+
     document.body.appendChild(modal);
 }
 
@@ -554,22 +866,44 @@ function hideStatusModal() {
     }
 }
 
-// Show auth error modal with relogin guidance
-function showAuthErrorModal(errorMessage = 'Authentication failed') {
-    // Remove any existing modals
+// The frame every modal that reports something shares: it replaces whatever
+// the page is already showing, closes on its Close button or a click outside
+// it, and takes itself away if the user does neither. What is inside it — the
+// heading, the message, any button of its own — is the caller's.
+function openReportingModal(innerHtml, { closeAfterMs = 20000 } = {}) {
     hideStatusModal();
     const existingModal = document.querySelector('.calendar-modal-overlay');
     if (existingModal) {
         existingModal.remove();
     }
-    
+
     const modal = document.createElement('div');
     modal.className = 'calendar-modal-overlay';
-    
-    modal.innerHTML = `
+    modal.innerHTML = innerHtml;
+    document.body.appendChild(modal);
+
+    const closeButton = modal.querySelector('button.secondary');
+    if (closeButton) {
+        closeButton.addEventListener('click', () => modal.remove());
+    }
+
+    modal.addEventListener('click', (event) => {
+        if (event.target === modal) {
+            modal.remove();
+        }
+    });
+
+    setTimeout(() => modal.remove(), closeAfterMs);
+
+    return modal;
+}
+
+// Show auth error modal with relogin guidance
+function showAuthErrorModal(errorMessage = 'Authentication failed') {
+    const modal = openReportingModal(`
         <div class="status-modal error">
             <h3>⚠️ Authentication Failed</h3>
-            <div class="error-message">${errorMessage}</div>
+            <div class="error-message"></div>
             <div class="relogin-instructions">
                 <strong>To fix this issue:</strong>
                 <ol>
@@ -585,14 +919,13 @@ function showAuthErrorModal(errorMessage = 'Authentication failed') {
                 <button class="secondary">Close</button>
             </div>
         </div>
-    `;
-    
-    document.body.appendChild(modal);
-    
-    // Add event listeners
+    `);
+
+    // The message comes from the backend, so it is attached as text.
+    modal.querySelector('.error-message').textContent = errorMessage;
+
     const signInButton = modal.querySelector('.signin-button');
-    const closeButton = modal.querySelector('.secondary');
-    
+
     signInButton.addEventListener('click', async () => {
         console.log('🔵 User clicked Sign in with Google from auth error modal');
         signInButton.disabled = true;
@@ -636,41 +969,33 @@ function showAuthErrorModal(errorMessage = 'Authentication failed') {
             signInButton.style.backgroundColor = '#d93025';
         }
     });
-    
-    closeButton.addEventListener('click', () => {
-        modal.remove();
-    });
-    
-    // Close on overlay click
-    modal.addEventListener('click', (e) => {
-        if (e.target === modal) {
-            modal.remove();
-        }
-    });
-    
-    // Auto-remove after 20 seconds
-    setTimeout(() => {
-        if (modal.parentElement) {
-            modal.remove();
-        }
-    }, 20000);
+}
+
+// Show a failed Extraction. A Screenshot has no basic fallback, so the user
+// gets the reason — a monthly limit, a backend failure — instead of an
+// invented event.
+function showExtractionErrorModal(errorMessage = 'Something went wrong') {
+    const modal = openReportingModal(`
+        <div class="status-modal error extraction-error">
+            <h3>⚠️ Could not create events</h3>
+            <div class="error-message"></div>
+            <div style="margin-top: 15px;">
+                <button class="secondary">Close</button>
+            </div>
+        </div>
+    `);
+
+    // The message comes from the backend, so it is attached as text.
+    modal.querySelector('.error-message').textContent = errorMessage;
 }
 
 // Show setup required modal when user has neither auth nor API key
 function showSetupRequiredModal() {
     console.log('🔧 Showing setup required modal');
-    
-    // Remove any existing modals
-    hideStatusModal();
-    const existingModal = document.querySelector('.calendar-modal-overlay');
-    if (existingModal) {
-        existingModal.remove();
-    }
-    
-    const modal = document.createElement('div');
-    modal.className = 'calendar-modal-overlay';
-    
-    modal.innerHTML = `
+
+    // Longer than the other modals: signing in or pasting a key is a job, not
+    // an acknowledgement.
+    const modal = openReportingModal(`
         <div class="status-modal error">
             <h3>🔧 Setup Required</h3>
             <div class="error-message">To use this extension, you need to either sign in with Google or provide your OpenAI API key.</div>
@@ -696,15 +1021,11 @@ function showSetupRequiredModal() {
                 <button class="secondary">Close</button>
             </div>
         </div>
-    `;
-    
-    document.body.appendChild(modal);
+    `, { closeAfterMs: 30000 });
     console.log('✅ Setup required modal added to page');
-    
-    // Add event listeners
+
     const signInButton = modal.querySelector('.signin-button');
-    const closeButton = modal.querySelector('.secondary');
-    
+
     signInButton.addEventListener('click', async () => {
         console.log('🔵 User clicked Sign in with Google from modal');
         signInButton.disabled = true;
@@ -748,29 +1069,95 @@ function showSetupRequiredModal() {
             signInButton.style.backgroundColor = '#d93025';
         }
     });
-    
-    closeButton.addEventListener('click', () => {
-        modal.remove();
-    });
-    
-    // Close on overlay click
-    modal.addEventListener('click', (e) => {
-        if (e.target === modal) {
-            modal.remove();
-        }
-    });
-    
-    // Auto-remove after 30 seconds (longer to allow sign-in)
-    setTimeout(() => {
-        if (modal.parentElement) {
-            modal.remove();
-            console.log('🗑️ Setup modal auto-removed');
-        }
-    }, 30000);
 }
 
-// Display the confirmation modal for event creation (supports multiple events)
-function showConfirmationModal(events, fallbackCalendarUrl) {
+// One Event's card. Everything on it — title, times, location, description —
+// is what a model read off the Source, so all of it is attached as text.
+function buildEventCard(event, index, formatDate) {
+    const card = document.createElement('div');
+    card.className = 'event-card';
+    card.dataset.index = String(index);
+
+    const header = document.createElement('div');
+    header.className = 'event-header';
+
+    const info = document.createElement('div');
+    info.className = 'event-info';
+
+    const title = document.createElement('h4');
+    title.className = 'event-title';
+    title.textContent = event.title ?? '';
+    info.appendChild(title);
+
+    const time = document.createElement('div');
+    time.className = 'event-time';
+    time.textContent = `\u{1F4C5} ${formatDate(event.startTime)} - ${formatDate(event.endTime)}`;
+    info.appendChild(time);
+
+    if (event.location) {
+        const location = document.createElement('div');
+        location.className = 'event-location';
+        location.textContent = `\u{1F4CD} ${event.location}`;
+        info.appendChild(location);
+    }
+
+    const addButton = document.createElement('button');
+    addButton.className = 'event-add-button';
+    addButton.dataset.url = createGoogleCalendarUrlForContent(event);
+    addButton.textContent = 'Add to Calendar';
+
+    header.appendChild(info);
+    header.appendChild(addButton);
+    card.appendChild(header);
+
+    if (event.description) {
+        const description = document.createElement('div');
+        description.className = 'event-description';
+        description.textContent = event.description;
+        card.appendChild(description);
+    }
+
+    return card;
+}
+
+// Show the user the Screenshot the Events were read from, without handing it
+// to the page it was taken of. A closed shadow root has no way in from the
+// outside — document.querySelector does not cross it, and the host's
+// shadowRoot is null — and attachShadow here is the isolated world's, so a
+// page cannot swap it for one it can open. Left in an attribute, the data URL
+// would be readable by any script on the page: for a Screenshot that is the
+// pixels of everything the tab was showing, cross-origin frames included.
+function attachScreenshotThumbnail(modal, screenshot) {
+    const host = document.createElement('div');
+    host.className = 'screenshot-thumbnail';
+
+    const shadow = host.attachShadow({ mode: 'closed' });
+
+    const style = document.createElement('style');
+    style.textContent = `
+        img {
+            display: block;
+            width: 100%;
+            max-height: 150px;
+            object-fit: contain;
+        }
+    `;
+
+    const thumbnail = document.createElement('img');
+    thumbnail.alt = 'The screenshot these events were read from';
+    thumbnail.src = screenshot;
+
+    shadow.appendChild(style);
+    shadow.appendChild(thumbnail);
+
+    const eventsList = modal.querySelector('.events-list');
+    eventsList.parentElement.insertBefore(host, eventsList);
+}
+
+// Display the confirmation modal for event creation (supports multiple events).
+// `screenshot` is the data URL of the Screenshot the Events were read from,
+// shown as a thumbnail; a Selection has none.
+function showConfirmationModal(events, fallbackCalendarUrl, screenshot) {
     // Remove any existing modals first
     const existingModal = document.querySelector('.calendar-modal-overlay');
     if (existingModal) {
@@ -791,29 +1178,10 @@ function showConfirmationModal(events, fallbackCalendarUrl) {
         return date.toLocaleString();
     };
 
-    // Generate event cards HTML (empty state when no events were found)
-    const eventsHtml = events.length === 0
-        ? '<div class="no-events-message">No events were found in the selected text.</div>'
-        : events.map((event, index) => {
-        const calendarUrl = createGoogleCalendarUrlForContent(event);
-        return `
-            <div class="event-card" data-index="${index}">
-                <div class="event-header">
-                    <div class="event-info">
-                        <h4 class="event-title">${event.title}</h4>
-                        <div class="event-time">
-                            📅 ${formatDate(event.startTime)} - ${formatDate(event.endTime)}
-                        </div>
-                        ${event.location ? `<div class="event-location">📍 ${event.location}</div>` : ''}
-                    </div>
-                    <button class="event-add-button" data-url="${calendarUrl}">
-                        Add to Calendar
-                    </button>
-                </div>
-                ${event.description ? `<div class="event-description">${event.description}</div>` : ''}
-            </div>
-        `;
-    }).join('');
+    // The empty state names the Source it read.
+    const emptyMessage = screenshot
+        ? 'No events were found in this screenshot.'
+        : 'No events were found in the selected text.';
 
     modal.innerHTML = `
         <div class="calendar-modal draggable" style="width: 500px;">
@@ -828,9 +1196,7 @@ function showConfirmationModal(events, fallbackCalendarUrl) {
                 </div>
                 <span class="events-count">${events.length} event${events.length !== 1 ? 's' : ''}</span>
             </div>
-            <div class="events-list">
-                ${eventsHtml}
-            </div>
+            <div class="events-list"></div>
             <a class="gc-ios-promo" href="https://apps.apple.com/app/id6772644308" target="_blank" rel="noopener" aria-label="Get Add to Calendar: AI Events on the App Store">
                 <span class="gc-ios-promo__icon" aria-hidden="true">
                     <svg viewBox="0 0 24 24" width="20" height="20" fill="none">
@@ -855,6 +1221,25 @@ function showConfirmationModal(events, fallbackCalendarUrl) {
             </div>
         </div>
     `;
+
+    // Every Event was read off the Source by a model, so the whole card is
+    // built through the DOM: a title of `<img src=x onerror=...>` is text the
+    // user reads, never markup this page runs.
+    const eventsList = modal.querySelector('.events-list');
+    if (events.length === 0) {
+        const empty = document.createElement('div');
+        empty.className = 'no-events-message';
+        empty.textContent = emptyMessage;
+        eventsList.appendChild(empty);
+    } else {
+        events.forEach((event, index) => {
+            eventsList.appendChild(buildEventCard(event, index, formatDate));
+        });
+    }
+
+    if (screenshot) {
+        attachScreenshotThumbnail(modal, screenshot);
+    }
 
     document.body.appendChild(modal);
 

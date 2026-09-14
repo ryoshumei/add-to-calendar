@@ -1,5 +1,20 @@
 // tests/configuration.test.js
 import { test, expect } from './fixtures/extension-fixtures.js';
+import fs from 'fs';
+import path from 'path';
+
+// The version in package.json, read from disk: the release number the manifest
+// has to agree with.
+function packageVersion() {
+  const packageFile = path.resolve(__dirname, '..', 'package.json');
+  return JSON.parse(fs.readFileSync(packageFile, 'utf-8')).version;
+}
+
+// The public config file, read from disk: the place a second, hand-written
+// version number used to live.
+function publicConfigSource() {
+  return fs.readFileSync(path.resolve(__dirname, '..', 'config.js'), 'utf-8');
+}
 
 test.describe('Configuration Management', () => {
   test.describe('CONFIG Object Loading', () => {
@@ -44,7 +59,6 @@ test.describe('Configuration Management', () => {
 
       // Check extension settings
       expect(configStructure.extensionKeys).toContain('NAME');
-      expect(configStructure.extensionKeys).toContain('VERSION');
     });
 
     test('should have valid URLs in configuration', async ({ popupPage }) => {
@@ -194,6 +208,36 @@ test.describe('Configuration Management', () => {
 
       // Check manifest version
       expect(manifestPermissions.manifestVersion).toBe(3);
+
+      // The version the backend reads from the X-Extension-Version header is
+      // the manifest's, and package.json says the same thing: one number to
+      // bump per release, checked here rather than left to drift.
+      expect(manifestPermissions.version).toBe(packageVersion());
+    });
+
+    // One release number, and it lives in the manifest. A copy in the public
+    // config is a second number free to disagree with it — it read 1.2.0 while
+    // the manifest said 1.3.0 — so the config carries none, and every caller
+    // asks chrome.runtime.getManifest() instead.
+    test('the public config carries no version of its own', async ({ popupPage, context }) => {
+      const [serviceWorker] = context.serviceWorkers();
+
+      const popupKeys = await popupPage.evaluate(() => Object.keys(CONFIG.EXTENSION));
+      const workerKeys = await serviceWorker.evaluate(() => Object.keys(CONFIG.EXTENSION));
+
+      expect(popupKeys).not.toContain('VERSION');
+      expect(workerKeys).not.toContain('VERSION');
+
+      // Not just that key: a copy under a different name cannot creep back in
+      // either. Two narrow nets rather than one wide one — banning every
+      // quoted dotted number in the file would also ban a pinned dependency
+      // that has nothing to do with the release number.
+      //
+      // Nothing in here is named after a version...
+      expect(publicConfigSource()).not.toMatch(/version\s*:\s*['"]/i);
+      // ...and the number the manifest is currently on appears nowhere in it,
+      // whatever the copy would have been called.
+      expect(publicConfigSource()).not.toContain(packageVersion());
     });
 
     test('should have valid OAuth client ID format', async ({ context }) => {
@@ -386,6 +430,278 @@ test.describe('Configuration Management', () => {
 
       expect(popupConfig.supabaseUrl).toBe(serviceWorkerConfig.supabaseUrl);
       expect(popupConfig.extensionName).toBe(serviceWorkerConfig.extensionName);
+    });
+  });
+
+  test.describe('Backend URL Resolution', () => {
+    test('should use the production backend when no override is stored', async ({ context }) => {
+      const [serviceWorker] = context.serviceWorkers();
+
+      const resolved = await serviceWorker.evaluate(async () => ({
+        storedOverride: await getBackendBaseUrlOverride(),
+        supabaseUrl: await resolveSupabaseUrl(),
+        processTextUrl: await resolveBackendUrl(CONFIG.EDGE_FUNCTIONS.PROCESS_TEXT),
+        configuredSupabaseUrl: CONFIG.SUPABASE_URL,
+        configuredProcessTextUrl: CONFIG.EDGE_FUNCTIONS.PROCESS_TEXT
+      }));
+
+      // Nothing stored: every real install resolves to the production project.
+      expect(resolved.storedOverride).toBeNull();
+      expect(resolved.supabaseUrl).toBe(resolved.configuredSupabaseUrl);
+      expect(resolved.processTextUrl).toBe(resolved.configuredProcessTextUrl);
+      expect(resolved.processTextUrl).toMatch(/^https:\/\/[a-z0-9]+\.supabase\.co\//);
+    });
+
+    test('should send the own-key path to OpenAI when no override is stored', async ({
+      context,
+    }) => {
+      const [serviceWorker] = context.serviceWorkers();
+
+      const resolved = await serviceWorker.evaluate(async () => ({
+        storedOverride: await getBackendBaseUrlOverride(),
+        openAiUrl: await resolveOpenAiUrl(),
+      }));
+
+      // The override reaches OpenAI as well as the backend, so this is the
+      // check that it stays inert for a real install: a user's own key must
+      // never post their Source anywhere but OpenAI.
+      expect(resolved.storedOverride).toBeNull();
+      expect(resolved.openAiUrl).toBe('https://api.openai.com/v1/chat/completions');
+    });
+
+    test('should ignore an override that is not a local address', async ({ context }) => {
+      const [serviceWorker] = context.serviceWorkers();
+
+      // The override moves the Supabase calls, the Edge Function calls and the
+      // own-key OpenAI call — the last carrying the user's raw key — so a
+      // value pointing anywhere but this machine is a way out for all three.
+      // Whatever put it in storage, it is ignored.
+      const resolved = await serviceWorker.evaluate(async () => {
+        const results = [];
+
+        for (const override of [
+          'https://evil.example.com',
+          'http://evil.example.com',
+          'https://127.0.0.1.evil.example.com',
+          'http://localhost.evil.example.com',
+          'not a url at all',
+          '//127.0.0.1:8080',
+        ]) {
+          await chrome.storage.local.set({ backend_base_url_override: override });
+          results.push({
+            override,
+            storedOverride: await getBackendBaseUrlOverride(),
+            supabaseUrl: await resolveSupabaseUrl(),
+            configuredSupabaseUrl: CONFIG.SUPABASE_URL,
+            processTextUrl: await resolveBackendUrl(CONFIG.EDGE_FUNCTIONS.PROCESS_TEXT),
+            openAiUrl: await resolveOpenAiUrl(),
+          });
+        }
+
+        await chrome.storage.local.remove('backend_base_url_override');
+        return results;
+      });
+
+      for (const result of resolved) {
+        expect(result.storedOverride, result.override).toBeNull();
+        expect(result.supabaseUrl, result.override).toBe(result.configuredSupabaseUrl);
+        expect(result.processTextUrl, result.override).toMatch(
+          /^https:\/\/[a-z0-9]+\.supabase\.co\//
+        );
+        expect(result.openAiUrl, result.override).toBe(
+          'https://api.openai.com/v1/chat/completions'
+        );
+      }
+    });
+
+    test('should honour a loopback override, which is all a test needs', async ({ context }) => {
+      const [serviceWorker] = context.serviceWorkers();
+
+      const resolved = await serviceWorker.evaluate(async () => {
+        const results = [];
+
+        for (const override of ['http://127.0.0.1:8123', 'http://localhost:8123/']) {
+          await chrome.storage.local.set({ backend_base_url_override: override });
+          results.push({
+            override,
+            storedOverride: await getBackendBaseUrlOverride(),
+            processTextUrl: await resolveBackendUrl(CONFIG.EDGE_FUNCTIONS.PROCESS_TEXT),
+            openAiUrl: await resolveOpenAiUrl(),
+          });
+        }
+
+        await chrome.storage.local.remove('backend_base_url_override');
+        return results;
+      });
+
+      expect(resolved[0].storedOverride).toBe('http://127.0.0.1:8123');
+      expect(resolved[0].processTextUrl).toBe('http://127.0.0.1:8123/functions/v1/process-text');
+      expect(resolved[0].openAiUrl).toBe('http://127.0.0.1:8123/v1/chat/completions');
+      expect(resolved[1].storedOverride).toBe('http://localhost:8123');
+    });
+  });
+
+  test.describe('Authentication start-up', () => {
+    test('starts auth once per worker, however many times it is asked', async ({ context }) => {
+      const [serviceWorker] = context.serviceWorkers();
+
+      // Two auth clients in one worker sign the user out from under each
+      // other: each restores the stored session and each clears it on the way
+      // out. Every wake-up, install and browser start means "make sure auth is
+      // ready", so they all have to land on the same client.
+      const sameClient = await serviceWorker.evaluate(async () => {
+        await initializeAuth();
+        const first = supabaseAuth;
+
+        await initializeAuth();
+        await initializeAuth();
+
+        return { same: supabaseAuth === first, built: Boolean(first) };
+      });
+
+      expect(sameClient.built).toBe(true);
+      expect(sameClient.same).toBe(true);
+    });
+
+    test('a client that has been torn down leaves the stored session alone', async ({ context }) => {
+      const [serviceWorker] = context.serviceWorkers();
+
+      // An abandoned client keeps listening for auth state changes, and its
+      // SIGNED_OUT removes the session the surviving client is signed in
+      // with. Tearing a client down has to take its listener with it.
+      const cleared = await serviceWorker.evaluate(async () => {
+        const seedSession = () =>
+          chrome.storage.local.set({
+            supabase_session: { access_token: 'stub-token', user: { email: 'orphan@example.com' } },
+          });
+        const sessionIsGone = async () =>
+          !(await chrome.storage.local.get('supabase_session')).supabase_session;
+
+        const startClient = async () => {
+          const auth = new SupabaseAuth();
+          await auth.initialize();
+          return auth;
+        };
+
+        // A live client clears the session on SIGNED_OUT — that is the sign
+        // out the user asked for, and the reason an abandoned one is harmful.
+        const live = await startClient();
+        await seedSession();
+        await live.supabase.auth.signOut({ scope: 'local' });
+        const byLiveClient = await sessionIsGone();
+
+        // The same thing, torn down first, has to leave the session standing.
+        const abandoned = await startClient();
+        await abandoned.teardown();
+        await seedSession();
+        await abandoned.supabase.auth.signOut({ scope: 'local' });
+        const byTornDownClient = await sessionIsGone();
+
+        await live.teardown();
+        await chrome.storage.local.remove('supabase_session');
+        return { byLiveClient, byTornDownClient };
+      });
+
+      expect(cleared.byLiveClient).toBe(true);
+      expect(cleared.byTornDownClient).toBe(false);
+    });
+
+    test('a start-up that fails leaves no client behind to sign the user out', async ({ context }) => {
+      const [serviceWorker] = context.serviceWorkers();
+
+      // A start-up that falls over part way forgets itself, so the next
+      // caller can try again. The client it had half built has to go with it:
+      // it is already listening, and nobody holds it any more.
+      const outcome = await serviceWorker.evaluate(async () => {
+        await initializeAuth();
+
+        const restoreSession = SupabaseAuth.prototype.restoreSession;
+        let halfBuilt = null;
+        SupabaseAuth.prototype.restoreSession = function () {
+          // The listener is on by this point; start-up falls over here.
+          halfBuilt = this.supabase;
+          throw new Error('start-up failed on purpose');
+        };
+
+        try {
+          // Clear the way for a fresh start-up, the way a first run has it.
+          await supabaseAuth?.teardown();
+          authStartUp = null;
+          supabaseAuth = null;
+          await initializeAuth();
+        } finally {
+          SupabaseAuth.prototype.restoreSession = restoreSession;
+        }
+
+        await chrome.storage.local.set({
+          supabase_session: { access_token: 'stub-token', user: { email: 'orphan@example.com' } },
+        });
+        await halfBuilt.auth.signOut({ scope: 'local' });
+        const sessionSurvived = Boolean(
+          (await chrome.storage.local.get('supabase_session')).supabase_session
+        );
+
+        // Nothing stored to restore, so the next start-up asks nobody.
+        await chrome.storage.local.remove('supabase_session');
+        await initializeAuth();
+
+        return { sessionSurvived, startsAgain: supabaseAuth !== null };
+      });
+
+      expect(outcome.sessionSurvived).toBe(true);
+      expect(outcome.startsAgain).toBe(true);
+    });
+
+    test('a teardown that throws still leaves auth able to start again', async ({ context }) => {
+      const [serviceWorker] = context.serviceWorkers();
+
+      // Tearing the half-built client down is the last thing a failed
+      // start-up does, and it can fall over itself. If it does, the failure
+      // still has to be forgotten: a rejected start-up left in the memo is
+      // the one thing every later caller would get, for the rest of the
+      // worker's life, and it would surface as an unhandled rejection at the
+      // call that started it.
+      const outcome = await serviceWorker.evaluate(async () => {
+        await initializeAuth();
+
+        // Clear the way for a fresh start-up, the way a first run has it.
+        await supabaseAuth?.teardown();
+        authStartUp = null;
+        supabaseAuth = null;
+
+        const { restoreSession, teardown } = SupabaseAuth.prototype;
+        SupabaseAuth.prototype.restoreSession = function () {
+          throw new Error('start-up failed on purpose');
+        };
+        SupabaseAuth.prototype.teardown = async function () {
+          // The real work first, so this test leaves no listening client
+          // behind, and then the failure the start-up has to survive.
+          await teardown.call(this);
+          throw new Error('teardown failed on purpose');
+        };
+
+        let startUpRejected = false;
+        try {
+          await initializeAuth();
+        } catch (error) {
+          startUpRejected = true;
+        } finally {
+          SupabaseAuth.prototype.restoreSession = restoreSession;
+          SupabaseAuth.prototype.teardown = teardown;
+        }
+
+        const forgotten = authStartUp === null;
+
+        // The next caller gets a client that works, not that same failure.
+        const ready = await ensureAuthInitialized();
+
+        return { startUpRejected, forgotten, ready, startsAgain: supabaseAuth !== null };
+      });
+
+      expect(outcome.startUpRejected).toBe(false);
+      expect(outcome.forgotten).toBe(true);
+      expect(outcome.ready).toBe(true);
+      expect(outcome.startsAgain).toBe(true);
     });
   });
 });

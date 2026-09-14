@@ -98,4 +98,58 @@ test.describe('LLM Prompt Configuration', () => {
       expect(body.messages[1].content).toContain('Team standup at 9am');
     });
   });
+
+  test.describe('buildImageRequestBody', () => {
+    test('should return complete OpenAI vision request body', async ({ context }) => {
+      const [serviceWorker] = context.serviceWorkers();
+
+      const body = await serviceWorker.evaluate(() => {
+        return LLM_CONFIG.buildImageRequestBody(
+          'data:image/jpeg;base64,QUJD',
+          '3/2/2026, 10:00:00 AM'
+        );
+      });
+
+      expect(body.model).toBe('gpt-4.1-mini');
+      expect(body.temperature).toBe(0.3);
+      expect(body.top_p).toBe(1);
+      expect(body.response_format).toEqual({ type: 'json_object' });
+      expect(body.messages).toHaveLength(2);
+      expect(body.messages[0].role).toBe('system');
+      expect(body.messages[1].role).toBe('user');
+    });
+
+    test('should carry the current date/time in the system prompt', async ({ context }) => {
+      const [serviceWorker] = context.serviceWorkers();
+
+      const body = await serviceWorker.evaluate(() => {
+        return LLM_CONFIG.buildImageRequestBody(
+          'data:image/jpeg;base64,QUJD',
+          '3/2/2026, 10:00:00 AM'
+        );
+      });
+
+      expect(body.messages[0].content).toContain('3/2/2026, 10:00:00 AM');
+      expect(body.messages[0].content).toContain('ONLY return the JSON object itself');
+    });
+
+    test('should send the Screenshot as an image part alongside the instruction text', async ({ context }) => {
+      const [serviceWorker] = context.serviceWorkers();
+
+      const body = await serviceWorker.evaluate(() => {
+        return LLM_CONFIG.buildImageRequestBody(
+          'data:image/jpeg;base64,QUJD',
+          '3/2/2026, 10:00:00 AM'
+        );
+      });
+
+      const userContent = body.messages[1].content;
+      expect(Array.isArray(userContent)).toBe(true);
+      expect(userContent).toHaveLength(2);
+      expect(userContent[0].type).toBe('text');
+      expect(userContent[0].text).toContain('3/2/2026, 10:00:00 AM');
+      expect(userContent[1].type).toBe('image_url');
+      expect(userContent[1].image_url).toEqual({ url: 'data:image/jpeg;base64,QUJD' });
+    });
+  });
 });
