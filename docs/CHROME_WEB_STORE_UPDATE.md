@@ -39,6 +39,44 @@ IMPROVEMENTS:
 • Fixed the screenshot setting in the popup, which was drawn as a full-width field instead of a checkbox
 ```
 
+### Full store description (paste over the whole field)
+
+The description field is replaced wholesale each release rather than patched,
+so this is the text as it should read, not a diff against the last one. The
+previous release's "what's new" entry is dropped: the field is read by someone
+deciding whether to install, and a stack of old entries buries the current one.
+
+```
+Calendar Event Creator turns anything on a webpage into a Google Calendar event. Select text, or draw a box over a poster, invite, or screenshot, and AI extracts the details — title, time, location, description — ready to confirm and add.
+
+What's new in v1.3.0
+- New: create events from a screenshot. Click "Capture screenshot" in the popup, or right-click and choose "Add screenshot to Google Calendar", then draw a box over the part of the page that holds the event
+- Only the box you draw is captured — it's downscaled in your browser, sent for extraction, and discarded, never stored. Press Enter or double-click for the whole visible tab; Esc cancels
+- A thumbnail in the confirmation window shows exactly what was read
+- The right-click screenshot item steps aside when you have text selected, so a selection offers the text action alone — and it can be turned off entirely in the popup
+- Fixed: the usage bar shows your real monthly count as soon as the popup opens, events you haven't added yet survive a failed screenshot, and you stay signed in after an extraction
+
+Key features
+- One-click event creation from any webpage text
+- Screenshot any part of a page — posters, embedded calendars, chat screenshots, PDFs — and turn it into events
+- Multi-event extraction — select text with several events and get them all at once
+- Automatic timezone detection using your browser's timezone
+- Works with receipts, card transactions, reservations, deliveries, and other dated records
+- Event titles match the language of your text (Japanese text → Japanese titles)
+- Preview and confirm in a draggable window; each event has its own "Add to Calendar" button
+- Visual usage tracker with color-coded progress bar (for signed-in users)
+
+Two ways to use it
+- Sign in with Google (recommended): 50 free event creations per month, no API key needed — and failed requests don't count against your limit
+- Bring your own OpenAI API key: unlimited client-side processing, for text and screenshots alike
+
+Perfect for creating events from emails, messages, receipts, booking confirmations, posters, or any text or image containing a date.
+
+Also on iPhone: snap a screenshot, get a calendar event — https://apps.apple.com/app/id6772644308
+
+Open Source: https://github.com/ryoshumei/add-to-calendar
+```
+
 ### Store listing additions
 The **summary** under the extension's name is `manifest.json`'s `description`,
 not a dashboard field: this release ships "Create Google Calendar events from
