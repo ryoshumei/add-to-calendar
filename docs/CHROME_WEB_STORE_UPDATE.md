@@ -99,17 +99,107 @@ Replace the **activeTab** line under PERMISSIONS EXPLAINED:
 • activeTab - Read the text you selected, and capture the visible tab when you start a screenshot (only the box you draw leaves the browser)
 ```
 
-### Privacy practices (developer dashboard)
-**Data Collection → Website Content**: "The text you select, or the screenshot Region you draw, sent only when you trigger the extension. Only the Region you draw is captured — pressing Enter or double-clicking makes that Region the whole visible tab — and nothing outside the visible tab is ever captured."
+### Privacy tab (developer dashboard)
 
-**Data Sharing → OpenAI**: "Text and images (the selected text or the screenshot Region) are sent to OpenAI to extract event details. Not stored by the extension."
+Every field below is replaced whole. The Screenshot Source is the reason: the
+old text describes an extension that only ever read selected text, and a
+reviewer comparing that against a feature that photographs the tab is the most
+likely way this release gets rejected. Each field is under the dashboard's
+1,000-character limit.
 
-**Data Retention**: "Selected text and screenshots are not retained; they are processed and discarded."
+**Data usage checkboxes — no change.** Personally identifiable information,
+Authentication information and Website content stay ticked; a screenshot is
+website content ("text, images, sounds, videos, or hyperlinks"), so the new
+Source adds no category. All three certifications stay ticked. Remote code
+stays "No". The privacy policy URL is unchanged.
 
-**Permission justification — `activeTab`** (replaces the earlier text):
-> The extension reads the text the user selected on the active tab, and when the user explicitly starts a screenshot (popup button or context-menu item) it captures the visible tab once, crops it in the browser to the rectangle the user drew, and sends only that region for event extraction. Pressing Enter or double-clicking on the overlay makes that rectangle the whole visible tab. Capture happens only on that user gesture; the extension never captures pages on its own, never captures anything outside the visible tab, and does not store the image.
+#### Single purpose
 
-The privacy policy page (`docs/index.html`, published via GitHub Pages) was updated in the same release: collection ("the Selection or the Screenshot Region you choose to send"), "only the Region you draw is captured — Enter or a double-click makes that Region the whole visible tab, and nothing outside the visible tab is ever captured", retention ("Screenshots are never stored"), and third parties ("OpenAI processes text and images").
+```
+This extension has one purpose: creating Google Calendar events from something the user points at on a webpage.
+
+The user points at it in one of two ways, and both feed the same extraction:
+1. Select text, right-click, choose "Add to Google Calendar"
+2. Start a screenshot from the popup button or the right-click menu, then drag a box over the part of the page holding the event
+
+Either way, AI reads the title, date, time and location out of what was chosen, shows them in a confirmation window, and the user adds each event to Google Calendar. Nothing is added without that confirmation.
+
+New in v1.3.0 is the screenshot source, for event details that sit inside an image - a poster, an embedded calendar, a chat screenshot - and so cannot be selected as text. It serves the same single purpose through the same extraction and the same confirmation step. Only the way the user points at the content differs.
+```
+
+#### contextMenus justification
+
+```
+The contextMenus permission puts the extension's two entry points on the right-click menu, which is the main way users reach it.
+
+1. "Add to Google Calendar" appears when the user has selected text, and creates events from that text.
+2. "Add screenshot to Google Calendar" appears when no text is selected, and starts the screenshot flow so the user can drag a box over event details that are part of an image rather than selectable text.
+
+The second item is deliberately absent while text is selected, so a selection offers the text action alone. Users who only use the popup button can remove that item entirely from a setting in the popup.
+
+Both items act only when clicked. The extension does not read page content or act on any page until the user chooses one of them.
+```
+
+#### storage justification
+
+```
+The storage permission is required to:
+1. Store OpenAI API key (optional): for users who choose to use their own API key, chrome.storage.sync saves it. The key is used solely for calls to OpenAI for text and image processing.
+2. Store authentication session: for users who sign in with Google, Supabase session tokens are kept in chrome.storage.local so the login survives browser restarts.
+3. Store usage information: for signed-in users, the current month's count (for example "15/50 requests used") is cached for display in the popup.
+4. Store one display setting: whether the "Add screenshot to Google Calendar" right-click item is shown, in chrome.storage.sync so the choice follows the user's Chrome profile.
+
+Screenshots are never stored. All stored data is necessary for the extension's functionality and is accessible only by this extension.
+```
+
+#### activeTab justification
+
+```
+The activeTab permission is used only when the user explicitly triggers the extension on the tab they are looking at. It allows us to:
+
+1. Read the text the user selected, when they choose "Add to Google Calendar"
+2. Capture the visible tab once, when the user starts a screenshot from the popup button or the right-click item. The capture is cropped in the browser to the rectangle the user dragged, and only that region is sent for event extraction. Pressing Enter or double-clicking makes that rectangle the whole visible tab.
+3. Show the confirmation window on the page, handle confirm/cancel, and display status or error messages
+
+Capture happens only on that user gesture. The extension never captures a page on its own, never captures anything outside the visible tab, does not store the image, and does not monitor or access tabs in the background.
+```
+
+#### scripting justification
+
+```
+The scripting permission is required to inject our content script on demand. That script:
+
+1. Draws the selection overlay the user drags to choose the screenshot region, and reports that rectangle plus the page's own viewport size and device pixel ratio so the crop lands exactly where the user drew it
+2. Creates and manages the confirmation window showing the extracted event details, including a thumbnail of the region that was read
+3. Handles the user's confirm or cancel before anything opens in Google Calendar
+4. Displays error messages or setup instructions when needed
+
+The script is injected only when the user triggers the extension, through the right-click menu or the popup button. We do not inject scripts proactively and do not monitor page content.
+```
+
+#### Host permission justification
+
+```
+Host permissions for https://*.supabase.co/* are required to reach our Supabase backend.
+
+What we use it for:
+1. Authentication API (auth/v1): verify Google OAuth tokens and manage sessions
+2. Edge Functions: process-text extracts events from selected text; process-image does the same for the screenshot region the user drew; get-usage reads the month's usage for the popup without spending a request
+3. Usage limits: check and update the monthly count for free tier users
+
+Why it is necessary: for users who sign in with Google, their text or screenshot is processed on our backend instead of requiring them to supply their own API key.
+
+Security: all calls are authenticated with JWT tokens, and Row Level Security means users reach only their own data.
+
+Note: users who supply their own OpenAI API key bypass our backend entirely.
+```
+
+#### identity and notifications — no change
+
+`identity` still describes Google sign-in exactly as it works. `notifications`
+still describes the fallback for pages where the content script cannot be
+injected, which is what a Screenshot on a browser page relies on; it also sits
+at 1,000/1,000 characters, so it has no room and needs none.
 
 ### Screenshots to add
 1. Region overlay mid-drag over an event poster
