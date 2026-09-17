@@ -15,7 +15,7 @@ Load the unpacked archive in a fresh Chrome profile before uploading and confirm
 ### Manual pre-release checks (cannot run under Playwright)
 - On a Retina display, draw a Region and confirm the image that reaches the confirmation modal thumbnail is exactly the drawn Region (device-pixel-ratio crop)
 - Start a Screenshot on a browser-internal page (`chrome://extensions`) or the Web Store and confirm the plain "cannot capture this page" error
-- The context-menu item appears on a page with nothing selected
+- The context-menu item appears on a page with nothing selected, and is absent while text is highlighted
 
 ### "What's New" (copy into the store field)
 ```
@@ -28,10 +28,15 @@ NEW: Screenshot Source
 • Works with your own OpenAI key (image goes straight to OpenAI) or with Google sign-in (one request of your monthly allowance, same as text)
 • A thumbnail in the confirmation modal shows what was read
 • A setting in the popup hides the right-click screenshot item if you only use the popup button
+• The right-click screenshot item steps aside when you have text highlighted, so a selection offers the text action alone
 
 IMPROVEMENTS:
 • Timetables and posters in Japanese and English extract one event per session
 • Clearer "no events found" state
+• The popup shows the month's real usage the moment you open it, instead of the number left over from your last extraction
+• Events you have not acted on stay on the page when a later screenshot fails, rather than being replaced by the error
+• You stay signed in after an extraction
+• Fixed the screenshot setting in the popup, which was drawn as a full-width field instead of a checkbox
 ```
 
 ### Store listing additions
@@ -47,7 +52,7 @@ Add to **KEY FEATURES**:
 Add to **HOW TO USE**:
 ```
 From a screenshot:
-1. Click the extension icon and "Capture screenshot" (or right-click → "Add screenshot to Google Calendar")
+1. Click the extension icon and "Capture screenshot" (or, with nothing highlighted, right-click → "Add screenshot to Google Calendar")
 2. Draw a box over the event details; release to capture (Esc cancels, Enter or double-click sends the whole visible tab)
 3. Review the extracted events and the thumbnail of what was read, then add each to Google Calendar
 ```
