@@ -61,14 +61,19 @@ Chrome extension that creates Google Calendar events from a Source the user poin
 **Always deploy both the backend AND extension together:**
 
 ```bash
-# 1. Set Supabase token (get from https://supabase.com/dashboard/account/tokens)
-export SUPABASE_ACCESS_TOKEN=your-token
+# 1. Authenticate once, either way — the deploy scripts accept both
+npx supabase login                       # interactive, persists
+# or: export SUPABASE_ACCESS_TOKEN=...   # https://supabase.com/dashboard/account/tokens
 
 # 2. Deploy backend function FIRST
 npm run deploy:backend
 
 # 3. Then publish Chrome extension to Web Store
 ```
+
+You do **not** need `supabase link`: every deploy script reads the project ref
+from `supabase/config.toml` and passes `--project-ref`, so a fresh checkout
+deploys to the right project.
 
 Or use the combined deploy script:
 ```bash
@@ -86,11 +91,13 @@ npm run deploy
 If you modify these files, you MUST redeploy the Supabase function:
 - `supabase/functions/process-text/index.ts` - Main backend logic
 - `supabase/functions/_shared/llm-prompt.ts` - Backend LLM prompt configuration
-- `supabase/functions/process-image/index.ts` and `supabase/functions/_shared/image-payload.ts` - Screenshot endpoint and its payload guard; deployed by `npm run deploy:backend:image`, which `npm run deploy` does **not** cover
-- `supabase/functions/get-usage/index.ts` - the read-only usage endpoint the popup's bar asks on open (`CONFIG.EDGE_FUNCTIONS.GET_USAGE`). **There is no npm script for it**: it is deployed by the `Deploy Backend` GitHub Actions workflow, which runs `supabase functions deploy` with no function name on every push to `main` that touches `supabase/**` and so deploys *all* of them. To deploy it by hand, `npx supabase functions deploy get-usage`
+- `supabase/functions/process-image/index.ts` and `supabase/functions/_shared/image-payload.ts` - Screenshot endpoint and its payload guard; `npm run deploy:backend:image`, which `npm run deploy` does **not** cover
+- `supabase/functions/get-usage/index.ts` - the read-only usage endpoint the popup's bar asks on open (`CONFIG.EDGE_FUNCTIONS.GET_USAGE`); `npm run deploy:backend:usage`
 - Any changes to the OpenAI prompt or model in the backend
 
-**The npm scripts are per-function and incomplete on purpose** — `deploy:backend` is process-text and `deploy:backend:image` is process-image, nothing else. Merging to `main` is what deploys every function; the scripts are for getting one out ahead of that.
+**One function per script, on purpose.** `npm run deploy` and `deploy:backend` are process-text only; `deploy:backend:image`, `deploy:backend:usage` are the others, and `deploy:backend:all` is every function. Merging to `main` also deploys them all, via the `Deploy Backend` workflow (`supabase functions deploy` with no function name, on any push touching `supabase/**`); the scripts are for getting one out ahead of that.
+
+All of them wrap `scripts/deploy-function.sh <name>...`, which resolves the project ref from `supabase/config.toml`, accepts either `SUPABASE_ACCESS_TOKEN` or an existing `supabase login`, and validates every name before deploying any. Run it with no arguments to list the deployable functions.
 
 ### Version Compatibility (IMPORTANT)
 Chrome extension review takes time. To avoid breaking users:

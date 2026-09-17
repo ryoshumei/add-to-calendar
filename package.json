@@ -12,8 +12,10 @@
     "eval:screenshot": "deno test --allow-net --allow-env --allow-read --allow-write --allow-run=node supabase/functions/_shared/llm-screenshot.eval.ts",
     "eval:generate": "deno run --allow-net --allow-env --allow-read --allow-write supabase/functions/_shared/generate-corpus.ts",
     "eval:judge": "deno test --allow-net --allow-env --allow-read --allow-write supabase/functions/_shared/llm-judge.eval.ts --",
-    "deploy:backend": "npx supabase functions deploy process-text",
-    "deploy:backend:image": "npx supabase functions deploy process-image",
+    "deploy:backend": "./scripts/deploy-function.sh process-text",
+    "deploy:backend:image": "./scripts/deploy-function.sh process-image",
+    "deploy:backend:usage": "./scripts/deploy-function.sh get-usage",
+    "deploy:backend:all": "./scripts/deploy-function.sh process-text process-image get-usage apple-link delete-account",
     "deploy": "./scripts/deploy.sh",
     "package": "./scripts/package-extension.sh"
   },
