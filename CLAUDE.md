@@ -81,11 +81,20 @@ npm run deploy
 ```
 
 ### Deployment Checklist
-- [ ] Deploy Supabase Edge Function: `npm run deploy:backend`
+- [ ] Deploy the Edge Functions this build talks to: `npm run deploy:backend:all`
 - [ ] Update version in manifest.json
 - [ ] Package extension: `npm run package`
-- [ ] Upload to Chrome Web Store Developer Dashboard
+- [ ] **Merge to `main` first, and confirm the privacy policy is live.** GitHub Pages serves `https://ryoshumei.github.io/add-to-calendar/` from **`main` `/docs`**, so an edit to `docs/index.html` sitting on a feature branch is invisible to the world while the dashboard links to it. The Web Store's privacy form makes you certify that "these disclosures reflect the most up-to-date content of your privacy policy", and a reviewer clicks that URL. Check the live page, not the file: `curl -sL https://ryoshumei.github.io/add-to-calendar/ | grep -ci <the new capability>`. Pages takes about a minute to rebuild after the merge
+- [ ] Run the manual checks in `docs/CHROME_WEB_STORE_UPDATE.md` on the packaged build — the ones Playwright cannot reach, because `captureVisibleTab` needs the activeTab grant only a real toolbar click gives
+- [ ] Upload to Chrome Web Store Developer Dashboard, and update the Privacy tab: the permission justifications are per-capability, so a release that adds one needs them rewritten
 - [ ] Test the published extension
+
+**The Web Store console cannot be automated.** Chrome refuses to let any
+extension script `chrome.google.com/webstore` or `chromewebstore.google.com`
+("The extensions gallery cannot be scripted"), the same protection that covers
+`chrome://` pages. Every dashboard field is typed by a human; keep the paste-ready
+copy in `docs/CHROME_WEB_STORE_UPDATE.md` current so that stays a paste, not a
+rewrite.
 
 ### Files That Require Backend Redeployment
 If you modify these files, you MUST redeploy the Supabase function:
