@@ -71,6 +71,56 @@ style.textContent = `
 }
 
 /* iOS app cross-promo strip (shown under the extracted events) */
+.gc-review-ask {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-top: 14px;
+    padding: 12px 14px;
+    border: 1px solid #e1e4e8;
+    border-radius: 12px;
+    background: #f8fafc;
+}
+.gc-review-ask__copy {
+    flex: 1 1 auto;
+    min-width: 0;
+    font-size: 13px;
+    line-height: 1.45;
+    color: #3c4653;
+}
+.gc-review-ask__actions {
+    flex: none;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.gc-review-ask__rate,
+.gc-review-ask__later {
+    font: inherit;
+    font-size: 13px;
+    padding: 6px 12px;
+    border-radius: 7px;
+    cursor: pointer;
+}
+.gc-review-ask__rate {
+    border: none;
+    background: #4285f4;
+    color: #fff;
+    font-weight: 600;
+}
+.gc-review-ask__rate:hover { background: #3574e0; }
+.gc-review-ask__later {
+    border: 1px solid #d7dce2;
+    background: #fff;
+    color: #5a6673;
+}
+.gc-review-ask__later:hover { background: #f1f3f5; }
+.gc-review-ask__rate:focus-visible,
+.gc-review-ask__later:focus-visible {
+    outline: 2px solid #4285f4;
+    outline-offset: 2px;
+}
+
 .gc-ios-promo {
     display: flex;
     align-items: center;
@@ -543,7 +593,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             return;
         }
 
-        showConfirmationModal(events, message.calendarUrl, message.screenshot);
+        showConfirmationModal(events, message.calendarUrl, message.screenshot, message.askForReview);
     } else if (message.type === "ERROR") {
         showError(message.message);
     } else if (message.type === "SHOW_STATUS") {
@@ -1174,7 +1224,19 @@ function attachScreenshotThumbnail(modal, screenshot) {
 // Display the confirmation modal for event creation (supports multiple events).
 // `screenshot` is the data URL of the Screenshot the Events were read from,
 // shown as a thumbnail; a Selection has none.
-function showConfirmationModal(events, fallbackCalendarUrl, screenshot) {
+// Shown in place of the App Store promo, so one modal carries one request.
+// Static markup with no model output in it, which is why it can be a template
+// rather than built through the DOM like the Event cards.
+const REVIEW_ASK_HTML = `
+            <div class="gc-review-ask" role="group" aria-label="Rate this extension">
+                <span class="gc-review-ask__copy">Getting your events in faster? A rating on the Chrome Web Store helps other people find this.</span>
+                <span class="gc-review-ask__actions">
+                    <button type="button" class="gc-review-ask__later">Not now</button>
+                    <button type="button" class="gc-review-ask__rate">Rate it</button>
+                </span>
+            </div>`;
+
+function showConfirmationModal(events, fallbackCalendarUrl, screenshot, askForReview = false) {
     // Every one, parked ones included: these Events are what the Screenshot
     // went and got, so they replace whatever the page was showing rather than
     // leaving it hidden in the document behind them.
@@ -1213,7 +1275,7 @@ function showConfirmationModal(events, fallbackCalendarUrl, screenshot) {
                 <span class="events-count">${events.length} event${events.length !== 1 ? 's' : ''}</span>
             </div>
             <div class="events-list"></div>
-            <a class="gc-ios-promo" href="https://apps.apple.com/app/id6772644308" target="_blank" rel="noopener" aria-label="Get Add to Calendar: AI Events on the App Store">
+            ${askForReview ? REVIEW_ASK_HTML : `<a class="gc-ios-promo" href="https://apps.apple.com/app/id6772644308" target="_blank" rel="noopener" aria-label="Get Add to Calendar: AI Events on the App Store">
                 <span class="gc-ios-promo__icon" aria-hidden="true">
                     <svg viewBox="0 0 24 24" width="20" height="20" fill="none">
                         <rect x="3.2" y="4.6" width="17.6" height="16" rx="4.4" fill="#fff" fill-opacity=".18"/>
@@ -1231,7 +1293,7 @@ function showConfirmationModal(events, fallbackCalendarUrl, screenshot) {
                     App Store
                 </span>
                 <span class="gc-ios-promo__chev" aria-hidden="true">›</span>
-            </a>
+            </a>`}
             <div class="calendar-modal-buttons">
                 <button class="cancel">Close</button>
             </div>
@@ -1311,8 +1373,34 @@ function showConfirmationModal(events, fallbackCalendarUrl, screenshot) {
             e.target.textContent = '✓ Added';
             e.target.classList.add('added');
             e.target.disabled = true;
+
+            // The worker keeps the count; this page only reports the event.
+            // Nothing waits on it — the user is already in Google Calendar.
+            chrome.runtime.sendMessage({ action: 'eventAdded' }).catch(() => {
+                // The worker was asleep or the extension reloaded. One
+                // uncounted Event is not worth surfacing to the user.
+            });
         });
     });
+
+    // Either answer is an answer: the ask is done and does not come back.
+    const reviewAsk = modal.querySelector('.gc-review-ask');
+    if (reviewAsk) {
+        const settle = () => {
+            chrome.runtime.sendMessage({ action: 'reviewPromptAnswered' }).catch(() => {});
+            reviewAsk.remove();
+        };
+        reviewAsk.querySelector('.gc-review-ask__rate').addEventListener('click', () => {
+            // Built from the id Chrome gave this install, so it cannot drift
+            // from whatever the listing's address happens to be.
+            window.open(
+                `https://chromewebstore.google.com/detail/${chrome.runtime.id}/reviews`,
+                '_blank'
+            );
+            settle();
+        });
+        reviewAsk.querySelector('.gc-review-ask__later').addEventListener('click', settle);
+    }
 
     // Close button
     modal.querySelector('button.cancel').addEventListener('click', () => {

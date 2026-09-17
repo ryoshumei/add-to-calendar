@@ -225,6 +225,25 @@ OPENAI_API_KEY=sk-... npm run eval:screenshot
 - Refreshed on popup open: a signed-in popup asks the service worker (`refreshUsage` → `fetchUsageFromBackend`, a GET to the read-only `get-usage` Edge Function, `CONFIG.EDGE_FUNCTIONS.GET_USAGE`), which stores the answer through the same `storeUsageInfo`. It spends no request, so the bar shows what the account has actually used — the iOS app shares this backend, so the stored count goes stale without it. A signed-out popup asks nothing, and a read that fails or comes back without a count leaves the cached number on the bar with no error shown
 - Visual indicator: Color-coded progress bar (green → yellow → orange → red as usage increases)
 
+### Review prompt
+A rating is asked for once, and only after the extension has demonstrably
+worked: the count is of Events the user actually sent to Google Calendar (the
+`eventAdded` message from the `.event-add-button` click), not Extractions that
+merely returned. `REVIEW_PROMPT_AFTER_ADDS` in `background.js` is the
+threshold, 3 today; the state is `reviewPrompt` (`{ adds, asked }`) in sync
+storage, so the ask follows the user's Chrome profile rather than repeating per
+device. The worker owns it — the content script reports the add and renders
+what it is told, exactly as it does for everything else.
+
+The ask appears on the *next* confirmation modal, not the one the Event was
+added from: by then Google Calendar has opened in a new tab and nobody is
+looking at the page. It stands **in place of** the App Store promo, so a modal
+carries one request rather than two. Either button answers it — "Rate it"
+opens `chromewebstore.google.com/detail/<chrome.runtime.id>/reviews` (built
+from the runtime id, so it cannot drift from the listing address; the store
+redirects it to the canonical slugged URL), "Not now" simply settles it — and
+`asked` is then permanent. Tests: `tests/review-prompt.test.js`.
+
 ### Extraction paths
 A Screenshot follows the same priority as a Selection (`background.js:handleScreenshotCapture`): the user's own OpenAI key first (`processScreenshotWithOpenAI`, built by `LLM_CONFIG.buildImageRequestBody` — the Region never reaches the shared backend), the backend second (`processImageWithBackend`), and with neither a key nor a session the trigger stops at the setup-required modal before the overlay opens (`background.js:startRegionCapture`). A Screenshot has no basic fallback: a failed Extraction is an error the user sees.
 

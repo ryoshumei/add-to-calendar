@@ -99,6 +99,48 @@ initializeAuth().catch(error => {
 // to the API key, so the choice follows them across their Chrome profile.
 const SCREENSHOT_MENU_ITEM_SETTING = 'showScreenshotMenuItem';
 
+// The review ask. A rating is worth asking for only once the extension has
+// actually worked for someone, so what is counted is Events the user sent to
+// their calendar, not Extractions that merely came back. Asked once, ever:
+// an ask that repeats is a nag, and a nag earns one star.
+const REVIEW_PROMPT_SETTING = 'reviewPrompt';
+const REVIEW_PROMPT_AFTER_ADDS = 3;
+
+async function readReviewPrompt() {
+    const stored = await chrome.storage.sync.get({
+        [REVIEW_PROMPT_SETTING]: { adds: 0, asked: false }
+    });
+    return { adds: 0, asked: false, ...stored[REVIEW_PROMPT_SETTING] };
+}
+
+// One Event the user sent to Google Calendar. Counting stops once the ask has
+// happened: the number is only ever read against the threshold below.
+async function countEventAdded() {
+    const prompt = await readReviewPrompt();
+    if (prompt.asked) {
+        return;
+    }
+    await chrome.storage.sync.set({
+        [REVIEW_PROMPT_SETTING]: { ...prompt, adds: prompt.adds + 1 }
+    });
+}
+
+// Whether the modal about to be shown is the one that asks. Deliberately not
+// the modal the Event was added from: by then Google Calendar has opened in a
+// new tab and the user is not looking at this page at all.
+async function shouldAskForReview() {
+    const prompt = await readReviewPrompt();
+    return !prompt.asked && prompt.adds >= REVIEW_PROMPT_AFTER_ADDS;
+}
+
+// Answered either way — rated or dismissed — is answered.
+async function markReviewAsked() {
+    const prompt = await readReviewPrompt();
+    await chrome.storage.sync.set({
+        [REVIEW_PROMPT_SETTING]: { ...prompt, asked: true }
+    });
+}
+
 // Registering is remove-then-create rather than an incremental edit, so the
 // menu always ends up as the setting describes however it got here — install,
 // browser start, or the setting being flipped. Serialised, because two
@@ -366,6 +408,18 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         }
 
         sendResponse({ success: true });
+    } else if (request.action === 'eventAdded') {
+        // Fire and forget: the user has already been sent to Google Calendar,
+        // and a counter is not worth making them wait on.
+        countEventAdded().catch(error => {
+            console.log('Could not count the added Event:', error);
+        });
+        sendResponse({ success: true });
+    } else if (request.action === 'reviewPromptAnswered') {
+        markReviewAsked()
+            .then(() => sendResponse({ success: true }))
+            .catch(error => sendResponse({ success: false, error: error.message }));
+        return true;
     } else if (request.action === 'userSignedOut') {
         currentUser = null;
         console.log('User signed out');
@@ -524,6 +578,7 @@ async function handleContextMenuClick(info, tab) {
                 const response = await sendToContentScript(tab.id, {
                     type: "SHOW_CONFIRMATION",
                     requestId,
+                    askForReview: await shouldAskForReview(),
                     events: eventDetails.events, // Send events array
                     calendarUrl: result.calendarUrl, // Kept for backward compatibility
                     result: result
@@ -750,6 +805,7 @@ async function handleScreenshotCapture(tab, region = null, metrics = {}) {
         try {
             await sendToContentScript(tab.id, {
                 type: 'SHOW_CONFIRMATION',
+                askForReview: await shouldAskForReview(),
                 requestId: `${tab.id}-${Date.now()}`,
                 events: eventDetails.events,
                 screenshot
