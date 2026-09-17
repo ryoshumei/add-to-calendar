@@ -392,6 +392,39 @@ test.describe('Region overlay', () => {
     expect(stubBackend.requestsTo(PROCESS_IMAGE_PATH, 'POST')).toHaveLength(1);
   });
 
+  test('an Extraction that fails keeps the earlier Events behind the error', async ({
+    context,
+    extensionId,
+    stubBackend,
+    sourcePage,
+    signedIn,
+  }) => {
+    await standInForCapture(context, sourcePage);
+
+    // Events from an Extraction the user has already been charged for, which
+    // they have not acted on yet.
+    await captureFromPopup(context, extensionId, sourcePage);
+    await expect(sourcePage.locator('.calendar-modal-overlay .event-card')).toHaveCount(1);
+
+    // The second Screenshot is refused by the backend, so this time the worker
+    // reports it in the page rather than staying quiet.
+    const limitMessage = 'Monthly limit exceeded (50/50). Resets on 2026-04-01.';
+    stubBackend.imageResponse = { status: 429, body: { error: limitMessage } };
+
+    await triggerCapture(context, extensionId, sourcePage);
+    await expect(sourcePage.locator(OVERLAY)).toBeVisible();
+    await drawRegion(sourcePage, { x: 100, y: 120, width: 260, height: 160 });
+
+    // The error is what they are looking at now...
+    await expect(sourcePage.locator('.calendar-modal-overlay .extraction-error')).toContainText(
+      limitMessage
+    );
+
+    // ...but the Events they were already charged for are still there behind
+    // it, not thrown away by the modal that reported the failure.
+    await expect(sourcePage.locator('.calendar-modal-overlay .event-card')).toHaveCount(1);
+  });
+
   test('an overlay the page removed itself stops driving anything', async ({
     context,
     extensionId,

@@ -32,14 +32,17 @@ echo ""
 if [[ "$ASSUME_YES" == "1" ]]; then
     echo "▶️  Deploy check skipped (--yes): deploying the backend is the caller's."
 else
-    echo "⚠️  IMPORTANT: Before packaging, ensure Supabase function is deployed!"
-    echo "   Command: npm run deploy:backend"
+    echo "⚠️  IMPORTANT: Before packaging, ensure the Supabase functions are deployed!"
+    echo "   Every endpoint this build talks to, not just process-text:"
+    echo "     npm run deploy:backend:all"
+    echo "   (or one at a time: deploy:backend, deploy:backend:image,"
+    echo "    deploy:backend:usage)"
     echo ""
-    read -p "Have you deployed the Supabase function? (y/n): " confirmed
+    read -p "Have you deployed the Supabase functions? (y/n): " confirmed
     if [[ "$confirmed" != "y" && "$confirmed" != "Y" ]]; then
         echo ""
         echo "❌ Packaging cancelled. Please deploy first:"
-        echo "   npm run deploy:backend"
+        echo "   npm run deploy:backend:all"
         echo ""
         exit 1
     fi

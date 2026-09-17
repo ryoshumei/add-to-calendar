@@ -2,7 +2,9 @@
 
 ## Version 1.3.0 — Screenshot Source
 
-This release adds a second Source: the user draws a Region over the visible tab and the extension extracts Events from that Screenshot through the same paths as a Selection (own OpenAI key, else the backend). **No new manifest permissions**; the backend is unchanged.
+This release adds a second Source: the user draws a Region over the visible tab and the extension extracts Events from that Screenshot through the same paths as a Selection (own OpenAI key, else the backend). **No new manifest permissions**, and the extraction logic is unchanged.
+
+The backend does change: `process-image` now turns away a payload that is over 10 MiB or is not a base64 image data URL, with a 400 and before the request is charged. **Deploy it before publishing this build** — `npm run deploy:backend:all`, or `npm run deploy:backend:image` for that endpoint alone.
 
 ### Package
 ```bash

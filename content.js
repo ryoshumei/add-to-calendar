@@ -784,15 +784,27 @@ async function sendRegion(region) {
     }
 }
 
+// Marks a modal that is out of the picture for a Screenshot rather than
+// finished with. A modal reporting something replaces what the page is
+// showing; without this it would take a parked one with it, and the Events of
+// an Extraction the user has already been charged for would go with it.
+const PARKED_FOR_CAPTURE = 'data-parked-for-capture';
+
 // Take everything the extension has on the page out of the picture, without
 // throwing it away: a confirmation the user has not acted on holds the Events
 // of an Extraction they have already been charged for. Hands back the way to
 // put it in front of them again.
 function hideModalsForCapture() {
     const modals = [...document.querySelectorAll('.calendar-modal-overlay')];
-    modals.forEach(modal => { modal.style.display = 'none'; });
+    modals.forEach(modal => {
+        modal.style.display = 'none';
+        modal.setAttribute(PARKED_FOR_CAPTURE, '');
+    });
 
-    return () => modals.forEach(modal => { modal.style.display = ''; });
+    return () => modals.forEach(modal => {
+        modal.removeAttribute(PARKED_FOR_CAPTURE);
+        modal.style.display = '';
+    });
 }
 
 // requestAnimationFrame runs just before the next paint, so it takes a second
@@ -872,7 +884,12 @@ function hideStatusModal() {
 // heading, the message, any button of its own — is the caller's.
 function openReportingModal(innerHtml, { closeAfterMs = 20000 } = {}) {
     hideStatusModal();
-    const existingModal = document.querySelector('.calendar-modal-overlay');
+    // A parked modal is left alone: it belongs to a Screenshot still in
+    // flight, which puts it back itself if the Screenshot comes to nothing.
+    // This one is appended after it, so it is the one the user is looking at.
+    const existingModal = document.querySelector(
+        `.calendar-modal-overlay:not([${PARKED_FOR_CAPTURE}])`
+    );
     if (existingModal) {
         existingModal.remove();
     }
@@ -1158,11 +1175,10 @@ function attachScreenshotThumbnail(modal, screenshot) {
 // `screenshot` is the data URL of the Screenshot the Events were read from,
 // shown as a thumbnail; a Selection has none.
 function showConfirmationModal(events, fallbackCalendarUrl, screenshot) {
-    // Remove any existing modals first
-    const existingModal = document.querySelector('.calendar-modal-overlay');
-    if (existingModal) {
-        existingModal.remove();
-    }
+    // Every one, parked ones included: these Events are what the Screenshot
+    // went and got, so they replace whatever the page was showing rather than
+    // leaving it hidden in the document behind them.
+    document.querySelectorAll('.calendar-modal-overlay').forEach(modal => modal.remove());
 
     // Ensure events is an array
     if (!Array.isArray(events)) {
