@@ -8,14 +8,6 @@ set -e
 echo "🚀 Starting deployment..."
 echo ""
 
-# Check if SUPABASE_ACCESS_TOKEN is set
-if [ -z "$SUPABASE_ACCESS_TOKEN" ]; then
-    echo "❌ Error: SUPABASE_ACCESS_TOKEN environment variable is not set"
-    echo "   Set it with: export SUPABASE_ACCESS_TOKEN=your-token"
-    echo "   Or get a token at: https://supabase.com/dashboard/account/tokens"
-    exit 1
-fi
-
 # Warning about version compatibility
 echo "⚠️  VERSION COMPATIBILITY CHECKLIST"
 echo "──────────────────────────────────────────────────────────────"
@@ -33,10 +25,14 @@ if [[ "$confirmed" != "y" && "$confirmed" != "Y" ]]; then
     exit 1
 fi
 
-# Deploy Supabase function
+# Deploy Supabase function. deploy-function.sh resolves the project ref from
+# supabase/config.toml and checks credentials, so this stays one line.
+#
+# Only process-text: the Screenshot endpoint is `npm run deploy:backend:image`
+# and the usage endpoint `npm run deploy:backend:usage`, or all of them with
+# `npm run deploy:backend:all`.
 echo ""
-echo "📦 Deploying Supabase Edge Function..."
-npx supabase functions deploy process-text
+./scripts/deploy-function.sh process-text
 
 echo ""
 echo "✅ Supabase function deployed!"

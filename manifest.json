@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Calendar Event Creator",
-  "version": "1.2.3",
-  "description": "Create Google Calendar events from selected text using OpenAI API",
+  "version": "1.3.0",
+  "description": "Create Google Calendar events from selected text or a screenshot using OpenAI",
   "permissions": [
     "contextMenus",
     "storage",

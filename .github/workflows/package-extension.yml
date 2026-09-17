@@ -27,43 +27,15 @@ jobs:
           echo "Building version: $VERSION"
 
       - name: Create extension package
+        env:
+          # The same archive scripts/package-extension.sh builds for a manual
+          # upload: one file list, so what a tag releases and what is uploaded
+          # to the Web Store cannot drift apart.
+          PACKAGE_ASSUME_YES: '1'
+          PACKAGE_OUTPUT: add-to-calendar-extension-v${{ steps.get_version.outputs.VERSION }}.zip
         run: |
-          # Create a temporary directory for packaging
-          mkdir -p extension-package
-
-          # Copy extension files (exclude development files)
-          rsync -av --progress . extension-package/ \
-            --exclude '.git' \
-            --exclude '.github' \
-            --exclude 'node_modules' \
-            --exclude 'tests' \
-            --exclude 'test-results' \
-            --exclude 'playwright-report' \
-            --exclude '.playwright-mcp' \
-            --exclude '.serena' \
-            --exclude 'supabase' \
-            --exclude 'shared' \
-            --exclude 'docs' \
-            --exclude 'local-docs' \
-            --exclude 'private' \
-            --exclude '.idea' \
-            --exclude '.env' \
-            --exclude '*.log' \
-            --exclude 'playwright.config.js' \
-            --exclude 'package.json' \
-            --exclude 'package-lock.json' \
-            --exclude '.gitignore' \
-            --exclude 'CLAUDE.md' \
-            --exclude '*.zip'
-
-          # Create zip file
-          cd extension-package
-          zip -r "../add-to-calendar-extension-v${{ steps.get_version.outputs.VERSION }}.zip" .
-          cd ..
-
-          # Verify zip contents
-          echo "Package contents:"
-          unzip -l "add-to-calendar-extension-v${{ steps.get_version.outputs.VERSION }}.zip"
+          chmod +x scripts/package-extension.sh
+          scripts/package-extension.sh
 
       - name: Upload extension package
         uses: actions/upload-artifact@v4

@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>社内研修スケジュール</title>
+<style>
+  body {
+    margin: 0;
+    padding: 36px;
+    background: #eef1f5;
+    font-family: "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Noto Sans JP",
+      "Yu Gothic", Meiryo, sans-serif;
+    color: #16202c;
+  }
+  .sheet {
+    max-width: 760px;
+    margin: 0 auto;
+    background: #fff;
+    border-radius: 10px;
+    border: 1px solid #d5dbe3;
+    overflow: hidden;
+  }
+  header { background: #1f3b57; color: #fff; padding: 28px 32px; }
+  header h1 { margin: 0 0 8px; font-size: 30px; }
+  header .date { font-size: 21px; color: #b7cde0; }
+  table { width: 100%; border-collapse: collapse; }
+  th {
+    text-align: left;
+    font-size: 16px;
+    color: #6b7c8f;
+    padding: 18px 32px 10px;
+    border-bottom: 2px solid #e3e8ee;
+  }
+  td {
+    padding: 18px 32px;
+    font-size: 19px;
+    border-bottom: 1px solid #e9edf2;
+    vertical-align: top;
+  }
+  td.time { white-space: nowrap; font-weight: 700; width: 180px; }
+  td.session .title { font-weight: 600; }
+  td.session .who { color: #62717f; font-size: 17px; margin-top: 4px; }
+  td.room { white-space: nowrap; color: #62717f; width: 150px; }
+  footer { padding: 20px 32px; font-size: 16px; color: #62717f; line-height: 1.8; }
+</style>
+</head>
+<body>
+  <div class="sheet">
+    <header>
+      <h1>社内研修スケジュール</h1>
+      <div class="date">2026年9月3日（木）／ 本社ビル</div>
+    </header>
+
+    <table>
+      <tr><th>時間</th><th>内容</th><th>場所</th></tr>
+      <tr>
+        <td class="time">10:00 〜 11:30</td>
+        <td class="session">
+          <div class="title">新人研修 オリエンテーション</div>
+          <div class="who">人事部 山口</div>
+        </td>
+        <td class="room">大会議室</td>
+      </tr>
+      <tr>
+        <td class="time">13:00 〜 14:30</td>
+        <td class="session">
+          <div class="title">情報セキュリティ講習</div>
+          <div class="who">情報システム部 岡田</div>
+        </td>
+        <td class="room">第2会議室</td>
+      </tr>
+      <tr>
+        <td class="time">15:00 〜 16:00</td>
+        <td class="session">
+          <div class="title">1on1 面談</div>
+          <div class="who">各配属部署のメンター</div>
+        </td>
+        <td class="room">オンライン</td>
+      </tr>
+    </table>
+
+    <footer>
+      受付は開始前に大会議室前で行います。筆記用具をご持参ください。
+    </footer>
+  </div>
+</body>
+</html>

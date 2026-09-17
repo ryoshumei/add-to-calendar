@@ -5,8 +5,13 @@ on:
     branches:
       - main
       - master
+      # Both spellings of the prefix: this repo has used feature/… and feat/…
+      # (feat/screenshot-source), and 'feature/**' does not match 'feat/…'.
       - 'feature/**'
+      - 'feat/**'
   pull_request:
+    # Filtered on the branch a pull request targets, so a feat/… head branch
+    # is already covered here.
     branches:
       - main
       - master
@@ -35,7 +40,10 @@ jobs:
         run: npx playwright install chromium --with-deps
 
       - name: Run tests
-        run: xvfb-run npm test
+        # No xvfb: the extension fixture runs Chrome in --headless=new, which
+        # wants no display. It was headed only because Playwright's own
+        # headless mode cannot load an MV3 extension.
+        run: npm test
 
       - name: Upload test results
         if: always()
@@ -63,3 +71,24 @@ jobs:
           echo "❌ Tests failed!"
           echo "Check the test report artifact for details"
           exit 1
+
+  backend:
+    name: Run Backend Unit Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      - name: Run backend unit tests
+        # `npm run test:backend` is `deno test supabase/functions/_shared/`:
+        # flagless on purpose, so the suite keeps needing no permissions.
+        # npm ships with the runner image and the script only shells out to
+        # deno, so there is nothing to install first.
+        run: npm run test:backend

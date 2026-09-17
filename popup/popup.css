@@ -126,6 +126,61 @@ h2 {
     font-size: 18px;
 }
 
+/* Screenshot capture */
+.capture-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    width: 100%;
+    padding: 11px 16px;
+    background-color: #4285f4;
+    border: none;
+    border-radius: 6px;
+    color: #fff;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background-color 0.2s;
+}
+
+.capture-btn:hover {
+    background-color: #3367d6;
+}
+
+/* Sits under the capture button: the other way of reaching the same thing. */
+/* Sits tight under the capture button on purpose: the toggle belongs to it. */
+.setting-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    margin-top: -4px;
+    color: #6a737d;
+    font-size: 13px;
+    line-height: 1.4;
+    cursor: pointer;
+}
+
+.setting-row input {
+    /* Its own size, whatever the field rules above say. */
+    width: auto;
+    flex: none;
+    margin: 0;
+    /* Nudged down to sit on the first line rather than its top edge. */
+    margin-top: 1px;
+    accent-color: #4285f4;
+    cursor: pointer;
+}
+
+.setting-row input:focus-visible {
+    outline: 2px solid #4285f4;
+    outline-offset: 2px;
+}
+
+.setting-row input:disabled {
+    cursor: default;
+}
+
 /* Authentication Section */
 .auth-section {
     display: flex;
@@ -275,18 +330,27 @@ label {
     align-items: center;
 }
 
-input {
+/* Text fields only. A bare `input` selector also caught the settings
+   checkbox: it stretched the box to the width of the row, so the tick drew in
+   the middle of an invisible field and pushed its label into a narrow
+   wrapping column. */
+input[type="text"],
+input[type="password"],
+input[type="email"] {
     width: 100%;
     padding: 8px 12px;
     border: 1px solid #ddd;
     border-radius: 4px;
     font-size: 14px;
-    outline: none;
     transition: border-color 0.2s;
 }
 
-input:focus {
+/* The border carries focus here, so no ring on top of it. */
+input[type="text"]:focus,
+input[type="password"]:focus,
+input[type="email"]:focus {
     border-color: #4285f4;
+    outline: none;
 }
 
 .toggle-btn {
