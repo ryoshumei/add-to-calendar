@@ -12,14 +12,22 @@ const BACKEND_BASE_URL_OVERRIDE_KEY = 'backend_base_url_override';
 const STUB_API_KEY = 'sk-stub-own-key';
 
 const test = base.extend({
-  context: async ({}, use) => {
+  // `headless` is Playwright's own option, so --headed and --debug turn the
+  // window back on; the config leaves it at its default of true.
+  context: async ({ headless }, use) => {
     const context = await chromium.launchPersistentContext('', {
+      // Not Playwright's headless: the mode it picks cannot load an MV3
+      // extension, and the service worker never starts. Chrome's own
+      // --headless=new can, so the browser is launched "headed" and put into
+      // that mode by flag — no window, and no stealing focus from whoever is
+      // at the keyboard.
       headless: false,
       args: [
         `--disable-extensions-except=${extensionPath}`,
         `--load-extension=${extensionPath}`,
         '--no-first-run',
         '--disable-gpu',
+        ...(headless ? ['--headless=new'] : []),
       ],
     });
 
