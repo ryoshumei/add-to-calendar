@@ -129,12 +129,18 @@ async function applyContextMenus() {
     });
 
     if (showScreenshotItem) {
-        // Every context, not just "page": a Screenshot is of the visible tab,
-        // so what the pointer happens to be over makes no difference to it.
+        // Everywhere except text. With something highlighted the user has
+        // already said what they mean, and the Selection item above answers
+        // it; offering to photograph the tab as well is a second question
+        // they did not ask. "editable" goes with it, because a selection
+        // inside a field carries both contexts and would put the item back on
+        // the menu in the one case this is meant to keep it off. The cost is
+        // that a right-click inside an empty field offers no Screenshot —
+        // the popup button still does.
         await ensureMenuItem({
             id: "addScreenshotToCalendar",
             title: "Add screenshot to Google Calendar",
-            contexts: ["all"]
+            contexts: ["page", "frame", "link", "image", "video", "audio"]
         });
     } else {
         await removeMenuItem("addScreenshotToCalendar");

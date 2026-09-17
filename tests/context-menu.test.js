@@ -49,9 +49,60 @@ async function expectMenu(context, expected) {
     .toEqual(expected);
 }
 
+// The contexts an item is registered with. Chrome has no way to read its own
+// menu back, so the registration is watched instead: the two calls that carry
+// contexts are wrapped, the menu is built again, and what they were handed is
+// the answer. It says what Chrome was told, not what Chrome then draws — a
+// native menu is not openable from here, which is why the rest of this file
+// drives the handler directly.
+async function registeredContexts(context, itemId) {
+  const [serviceWorker] = context.serviceWorkers();
+  return serviceWorker.evaluate(async (id) => {
+    const seen = {};
+    const realCreate = chrome.contextMenus.create;
+    const realUpdate = chrome.contextMenus.update;
+
+    chrome.contextMenus.create = function (item, callback) {
+      if (item && item.id) seen[item.id] = item.contexts;
+      return realCreate.call(chrome.contextMenus, item, callback);
+    };
+    chrome.contextMenus.update = function (menuItemId, properties, callback) {
+      if (properties && properties.contexts) seen[menuItemId] = properties.contexts;
+      return realUpdate.call(chrome.contextMenus, menuItemId, properties, callback);
+    };
+
+    try {
+      await registerContextMenus();
+    } finally {
+      chrome.contextMenus.create = realCreate;
+      chrome.contextMenus.update = realUpdate;
+    }
+
+    return seen[id] ?? null;
+  }, itemId);
+}
+
 test.describe('Screenshot context-menu item', () => {
   test('is in the menu of a fresh install, beside the Selection item', async ({ context }) => {
     await expectMenu(context, { selection: true, screenshot: true });
+  });
+
+  test('stays off the menu while the user has text highlighted', async ({ context }) => {
+    const contexts = await registeredContexts(context, SCREENSHOT_ITEM);
+
+    // "all" would include a selection, which is the case this excludes.
+    expect(contexts).not.toContain('all');
+    expect(contexts).not.toContain('selection');
+    // A selection inside a field carries "editable" too, so that goes as well.
+    expect(contexts).not.toContain('editable');
+
+    // Still there for the ordinary right-click the Screenshot is for.
+    expect(contexts).toContain('page');
+  });
+
+  test('the Selection item is still the one a highlight offers', async ({ context }) => {
+    const contexts = await registeredContexts(context, SELECTION_ITEM);
+    expect(contexts).toEqual(['selection']);
   });
 
   test('opens the Region overlay on a page with nothing highlighted', async ({
